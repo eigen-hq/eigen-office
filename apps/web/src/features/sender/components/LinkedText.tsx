@@ -2,13 +2,10 @@ import { useMemo, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { useMailAccounts } from '@/lib/api';
 import { draftFor, draftKeys, setDraft } from '@/lib/drafts';
+import { LinkChip, TEXT_LINK_CLASS, withoutPointy, WRITTEN_URL } from '@/lib/links';
 import { linkify, shortUrl } from '@/lib/linkify';
 import { useSender } from '../hooks/useSender';
 import { NEW_MAIL } from '../lib/mail';
-
-/** A link in written words: Slider's link colour, underlined softly, firmer on hover. */
-const TEXT_LINK_CLASS =
-  'text-info underline decoration-info/40 underline-offset-2 hover:decoration-info focus-visible:rounded-mark focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none';
 
 /** A plain click – not one that asks for a new tab or a copy of the link. */
 const plain = (event: MouseEvent) =>
@@ -19,12 +16,18 @@ const plain = (event: MouseEvent) =>
  * (a long one shortened to its host and the start of its path, the whole in its tooltip), phone
  * numbers to call (`tel:`), mail addresses to write to – here, in „Neue Mail“ with the address
  * in „An“, where the workspace has a mailbox (else, and with ⌘ or a middle click, `mailto:`).
+ * `chips`: an address written out (`https://…`) is a chip – its site's icon and the page's title
+ * (`LinkChip`), as in every text people write here; a received mail's addresses stay as written
+ * (its links are never read by the server: one may sign in or unsubscribe).
  */
-export function LinkedText({ text }: { text: string }) {
+export function LinkedText({ text, chips = false }: { text: string; chips?: boolean }) {
   const ui = useSender();
   const navigate = useNavigate();
   const mailboxes = useMailAccounts(ui.workspace.id).data ?? [];
-  const parts = useMemo(() => linkify(text), [text]);
+  const parts = useMemo(
+    () => (chips ? withoutPointy(linkify(text)) : linkify(text)),
+    [text, chips],
+  );
   const writeTo = (event: MouseEvent, address: string) => {
     if (mailboxes.length === 0 || !plain(event)) return;
     event.preventDefault();
@@ -46,6 +49,9 @@ export function LinkedText({ text }: { text: string }) {
     <>
       {parts.map((part, index) => {
         if (part.kind === 'text') return part.text;
+        if (chips && part.kind === 'url' && WRITTEN_URL.test(part.text)) {
+          return <LinkChip key={index} url={part.href} />;
+        }
         const shown = part.kind === 'url' ? shortUrl(part.text) : part.text;
         return (
           <a

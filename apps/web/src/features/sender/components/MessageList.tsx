@@ -1,5 +1,4 @@
 import { SentAttachments } from '@/features/attachments';
-import { LinkCard } from './LinkCard';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   DELETED_ACCOUNT_NAME,
@@ -541,11 +540,6 @@ export function MessageList({
                         (bearbeitet)
                       </span>
                     )}
-                  </div>
-                )}
-                {message.text && !isPending(message) && (
-                  <div className="pt-1.5">
-                    <LinkCard text={message.text} />
                   </div>
                 )}
                 <SentAttachments

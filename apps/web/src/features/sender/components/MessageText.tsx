@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { EVERYONE_TAG, MENTION_NOT_AFTER, type AccountAuthor } from '@slider/shared';
+import { LinkCard, loneUrl } from '@/lib/links';
 import { cn } from '@/ui';
 import { LinkedText } from './LinkedText';
 import { MARKUP_LOOK, markupLines, markupRuns, type MarkupRun } from '../lib/markup';
@@ -45,7 +46,7 @@ function Mentioned({
   for (const match of pattern ? text.matchAll(pattern) : []) {
     const token = match[0];
     const index = match.index;
-    if (index > at) parts.push(<LinkedText key={`t${at}`} text={text.slice(at, index)} />);
+    if (index > at) parts.push(<LinkedText key={`t${at}`} text={text.slice(at, index)} chips />);
     const mine = means(token, me);
     parts.push(
       <span
@@ -60,7 +61,7 @@ function Mentioned({
     );
     at = index + token.length;
   }
-  if (at < text.length) parts.push(<LinkedText key={`t${at}`} text={text.slice(at)} />);
+  if (at < text.length) parts.push(<LinkedText key={`t${at}`} text={text.slice(at)} chips />);
   return <>{parts}</>;
 }
 
@@ -145,9 +146,13 @@ type Block =
   | { kind: 'code'; text: string }
   | { kind: 'list'; ordered: boolean; start: number; items: string[] }
   | { kind: 'heading'; level: 1 | 2; text: string }
-  | { kind: 'quote'; text: string };
+  | { kind: 'quote'; text: string }
+  | { kind: 'card'; url: string };
 
-/** The lines in blocks: a code block, a list, a heading, a quote, and the lines between. */
+/**
+ * The lines in blocks: a code block, a list, a heading, a quote, a web address on a line of its
+ * own (its card, `LinkCard`), and the lines between.
+ */
 function blocksOf(text: string): Block[] {
   const blocks: Block[] = [];
   let code: string[] | null = null;
@@ -178,6 +183,8 @@ function blocksOf(text: string): Block[] {
     else if (line.kind === 'quote') {
       if (last?.kind === 'quote') last.text += `\n${line.text}`;
       else blocks.push({ kind: 'quote', text: line.text });
+    } else if (loneUrl(line.text) && !loneUrl(line.text)!.pointy) {
+      blocks.push({ kind: 'card', url: loneUrl(line.text)!.url });
     } else if (last?.kind === 'lines') last.text += `\n${line.text}`;
     else blocks.push({ kind: 'lines', text: line.text });
   }
@@ -186,7 +193,8 @@ function blocksOf(text: string): Block[] {
 
 /**
  * A message's text as written – lines kept, web addresses, mails and phone numbers as links
- * (`LinkedText`), @-names marked (one's own more strongly), and its formatting (`markup.ts`):
+ * (`LinkedText`; an address in a sentence its chip, one on a line of its own its card – as in
+ * every text people write here, `lib/links`), @-names marked (one's own more strongly), and its formatting (`markup.ts`):
  * **fett**, _kursiv_, <u>unterstrichen</u>, ~~durch~~, `Code`, [Links](…), ```Codeblock```,
  * „- “ / „1. “ lists, „# “ / „## “ headings, „> “ quotes – as `RichField` shows it while typed.
  */
@@ -243,6 +251,15 @@ export function MessageText({
             return (
               <span key={index} className={cn('block', MARKUP_LOOK.quote)}>
                 <Inline text={block.text} pattern={pattern} me={me} />
+              </span>
+            );
+          case 'card':
+            return (
+              <span key={index} className="block py-1">
+                <LinkCard
+                  url={block.url}
+                  fallback={<Inline text={block.url} pattern={pattern} me={me} />}
+                />
               </span>
             );
           case 'lines':
