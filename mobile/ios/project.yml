@@ -1,0 +1,39 @@
+# Eigen Office for the iPad – `xcodegen generate` makes Office.xcodeproj (not kept in git).
+name: Office
+options:
+  bundleIdPrefix: dev.bertro
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Office:
+    type: application
+    platform: iOS
+    sources: [Office]
+    info:
+      path: Office/Info.plist
+      properties:
+        CFBundleDisplayName: Eigen Office
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIRequiresFullScreen: false
+        UISupportedInterfaceOrientations~ipad:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown,
+           UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft,
+           UIInterfaceOrientationLandscapeRight]
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.bertro.office.auth
+            CFBundleURLSchemes: [slider-tablet]
+        NSCameraUsageDescription: Für Videoanrufe und Videokommentare.
+        NSMicrophoneUsageDescription: Für Anrufe, Sprach- und Videokommentare und um mit der KI zu sprechen.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: dev.bertro.office
+      PRODUCT_NAME: Office
+      TARGETED_DEVICE_FAMILY: "1,2"
+      SWIFT_VERSION: "5.0"
+      ENABLE_USER_SCRIPT_SANDBOXING: YES
+      ASSETCATALOG_COMPILER_APPICON_NAME: ""
