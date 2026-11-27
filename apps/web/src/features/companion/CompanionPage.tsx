@@ -1,6 +1,11 @@
-import { aiInSentence, MAX_MATERIAL_CHAT_MESSAGE, type Workspace } from '@slider/shared';
+import {
+  aiInSentence,
+  MAX_MATERIAL_CHAT_MESSAGE,
+  type CompanionView,
+  type Workspace,
+} from '@slider/shared';
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useAccount } from '@/features/auth';
 import { OwnAgentCallButton } from '@/features/calls';
 import { CloudProvider, CompanionChat, EventPanel, TodoPanel } from '@/features/cloud';
@@ -8,11 +13,15 @@ import { SenderProvider, SenderToast } from '@/features/sender';
 import { onCallHere, ownCallHere, useCallHere } from '@/lib/call-here';
 import { useCompanionHeard } from '@/lib/companion';
 import { isTextTarget } from '@/lib/dom';
-import { routes } from '@/lib/routes';
+import { CLOUD_EVENT_PARAM, CLOUD_TODO_PARAM, routes } from '@/lib/routes';
 import { readLastWorkspaceId } from '@/features/workspaces';
 import { Icon, IconButton, Toast, useToast, type ShowToast } from '@/ui';
+import { CompanionAmbient } from './components/CompanionAmbient';
 import { ASKS_ITSELF, CompanionBody } from './components/CompanionBodies';
 import { deskThere } from './lib/auto';
+import { useAmbient } from './lib/ambient';
+import { askDesk } from './lib/command';
+import { useHeldView } from './lib/hold';
 import { CompanionTitle } from './lib/title';
 import { useWakeLock } from './lib/wake-lock';
 
@@ -62,7 +71,9 @@ export function Component() {
   const now = useMinute();
   useWakeLock(deskThere(desk, now));
   const [title, setTitle] = useState<string | null>(null);
-  const view = desk?.view ?? null;
+  // Touched: a new page on the computer waits for „Zeigen“.
+  const held = useHeldView(desk?.view ?? null);
+  const view = held.view;
   const workspace =
     account.workspaces.find((each) => each.id === view?.workspaceId) ??
     account.workspaces.find((each) => each.id === readLastWorkspaceId()) ??
@@ -101,6 +112,7 @@ export function Component() {
             {view ? title || view.title || 'Eigen Office' : 'Nichts offen'}
           </h1>
         </div>
+        {workspace && desk && <OpenOnDesk workspaceId={workspace.id} notify={notify} />}
         {view && (
           <IconButton
             icon="openInNew"
@@ -112,9 +124,29 @@ export function Component() {
         {workspace && <OwnAgentCallButton workspaceId={workspace.id} />}
         <IconButton icon="close" label="Begleiter beenden (Esc)" variant="ghost" onClick={leave} />
       </header>
+      {held.waiting && (
+        <button
+          type="button"
+          onClick={held.show}
+          className="flex shrink-0 items-center gap-2 border-b border-hairline bg-surface-1 px-3 py-2 text-left text-caption text-fg-muted hover:bg-hover"
+        >
+          <Icon name="desktopWindows" size={16} className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate">
+            {held.waiting.kind === 'page'
+              ? `Am Computer: ${held.waiting.title || 'Eigen Office'}`
+              : `Am Computer: ${KIND_WORDS[held.waiting.kind]} | ${held.waiting.title}`}
+          </span>
+          <span className="shrink-0 font-semibold text-fg">Zeigen</span>
+        </button>
+      )}
       {workspace ? (
         <CompanionTitle value={setTitle}>
-          <CompanionWorkspace workspace={workspace} notify={notify} />
+          <CompanionWorkspace
+            workspace={workspace}
+            view={view}
+            active={!!desk?.active}
+            notify={notify}
+          />
         </CompanionTitle>
       ) : (
         <p className="p-4 text-body text-fg-muted">Du bist noch in keinem Workspace.</p>
@@ -124,14 +156,63 @@ export function Component() {
   );
 }
 
+/**
+ * „Am Computer öffnen“: a to-do or an event opened here (its panel over the page) opens on the
+ * computer too – there it can be worked on at the desk.
+ */
+function OpenOnDesk({ workspaceId, notify }: { workspaceId: string; notify: ShowToast }) {
+  const [params] = useSearchParams();
+  const todo = params.get(CLOUD_TODO_PARAM);
+  const event = params.get(CLOUD_EVENT_PARAM);
+  const day = params.get('am');
+  const path = todo
+    ? `${routes.cloudTodos(workspaceId)}?${new URLSearchParams({ [CLOUD_TODO_PARAM]: todo })}`
+    : event && event !== 'neu'
+      ? `${routes.cloudCalendar(workspaceId)}?${new URLSearchParams(
+          event === 'tag' && day
+            ? { [CLOUD_EVENT_PARAM]: 'tag', am: day }
+            : { [CLOUD_EVENT_PARAM]: event },
+        )}`
+      : null;
+  if (!path) return null;
+  return (
+    <IconButton
+      icon="desktopWindows"
+      label="Am Computer öffnen"
+      variant="ghost"
+      onClick={() =>
+        void askDesk({ type: 'open', path }, notify).then((sent) => {
+          // Not seen here: said where it happened.
+          if (sent) notify('Am Computer geöffnet.');
+        })
+      }
+    />
+  );
+}
+
 /** The page's parts inside the workspace's Sender and Cloud – as on the computer. */
-function CompanionWorkspace({ workspace, notify }: { workspace: Workspace; notify: ShowToast }) {
-  const { desk } = useCompanionHeard();
-  const view = desk?.view ?? null;
+function CompanionWorkspace({
+  workspace,
+  view,
+  active,
+  notify,
+}: {
+  workspace: Workspace;
+  /** What the phone shows of the computer (held while touched). */
+  view: CompanionView | null;
+  active: boolean;
+  notify: ShowToast;
+}) {
   const here = useOwnLines();
   const [chatOpen, setChatOpen] = useState(false);
   const [ask, setAsk] = useState<string | null>(null);
   const [body, setBody] = useState('');
+  const [params] = useSearchParams();
+  // Resting on its stand – not while presenting, the AI's chat or a panel is open.
+  const ambient = useAmbient(
+    view ? `${view.kind}:${view.id ?? ''}:${view.path}` : '',
+    !!view?.show || chatOpen || params.has(CLOUD_TODO_PARAM) || params.has(CLOUD_EVENT_PARAM),
+  );
   const send = () => {
     const text = body.trim();
     if (!text) return;
@@ -172,7 +253,7 @@ function CompanionWorkspace({ workspace, notify }: { workspace: Workspace; notif
         </main>
         {/* The AI below everything (a column with its own „Nachfragen“ has it there): a question
             in writing opens its chat; called from the header. */}
-        {!ASKS_ITSELF.has(view?.kind ?? 'page') && (
+        {!ASKS_ITSELF.has(view?.kind ?? 'page') && !view?.show && (
           <form
             aria-label={`Nachricht an ${aiInSentence(workspace.aiName)}`}
             onSubmit={(event) => {
@@ -205,6 +286,20 @@ function CompanionWorkspace({ workspace, notify }: { workspace: Workspace; notif
             onAsked={() => setAsk(null)}
             notify={notify}
             onClose={() => setChatOpen(false)}
+          />
+        )}
+        {ambient.resting && (
+          <CompanionAmbient
+            // What it is, not its title: the screen is seen by whoever passes.
+            line={
+              !view
+                ? 'Kein Computer offen'
+                : view.kind === 'page'
+                  ? 'Am Computer'
+                  : `Am Computer: ${KIND_WORDS[view.kind]}`
+            }
+            active={active}
+            onWake={ambient.wake}
           />
         )}
         {/* A to-do or an event tapped opens here, as in Cloud. */}

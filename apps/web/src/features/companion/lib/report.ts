@@ -1,12 +1,18 @@
-import { COMPANION_RECENT_MS, type CompanionReport, type CompanionView } from '@slider/shared';
+import {
+  COMPANION_RECENT_MS,
+  COMPANION_REFRESH_MS,
+  companionPathSchema,
+  type CompanionReport,
+  type CompanionView,
+} from '@slider/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { matchPath, useLocation } from 'react-router';
+import { matchPath, useLocation, useNavigate } from 'react-router';
 import { useCallsOrNull } from '@/features/calls';
 import { diagramKeys, queryKeys, readerKeys, writerKeys } from '@/lib/api';
 import { api } from '@/lib/api-client';
 import { onCallHere, ownCallHere } from '@/lib/call-here';
-import { useCompanionHeard } from '@/lib/companion';
+import { onCompanionCommand, useCompanionHeard, useCompanionShow } from '@/lib/companion';
 import { useActiveWorkspace } from '@/features/workspaces';
 import { useInFront } from './device';
 import { viewOf } from './view';
@@ -102,6 +108,27 @@ const pageTitle = () => {
 };
 
 /**
+ * „Am Computer öffnen“ on the phone: the page it names opens in this tab (the computer tab the
+ * phone shows – the server hands it to that one alone). Only the app's own addresses; not while a
+ * slide show or a call runs here – that is not taken away from under one.
+ */
+function useOpenFromPhone(on: boolean, busy: boolean) {
+  const navigate = useNavigate();
+  const busyRef = useRef(busy);
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+  useEffect(() => {
+    if (!on) return;
+    return onCompanionCommand((command) => {
+      if (command.type !== 'open' || busyRef.current) return;
+      const path = companionPathSchema.safeParse(command.path);
+      if (path.success) void navigate(path.data);
+    });
+  }, [on, navigate]);
+}
+
+/**
  * Every signed-in tab tells the server what it is (phone or desk), whether one works at it and –
  * a desk – what its page is about, on every change and after every reconnect of its stream
  * (`POST /calls/companion`). A desk's page: from its address, its title and its lines for the
@@ -116,6 +143,8 @@ export function useReportView(phone: boolean) {
   const workspace = useActiveWorkspace();
   const openedWorkspace = useOpenedWorkspace(location.pathname);
   const inUse = useInUse(!phone && signedIn);
+  const show = useCompanionShow();
+  useOpenFromPhone(!phone && signedIn, !!show || !!calls?.snap.active);
   const [lines, setLines] = useState(ownCallHere);
   const [title, setTitle] = useState(() => (typeof document === 'undefined' ? '' : pageTitle()));
 
@@ -131,7 +160,7 @@ export function useReportView(phone: boolean) {
     return () => watcher.disconnect();
   }, []);
 
-  const view: CompanionView | null = phone
+  const page: CompanionView | null = phone
     ? null
     : viewOf(
         location.pathname,
@@ -140,23 +169,41 @@ export function useReportView(phone: boolean) {
         lines,
         openedWorkspace ?? workspace?.id ?? null,
       );
+  // A slide show of the deck open here: where it is, for the phone's presenter view.
+  const view =
+    page && show && page.kind === 'deck' && page.id === show.deckId ? { ...page, show } : page;
   const report: CompanionReport | null = peerId
     ? { peerId, device: phone ? 'phone' : 'desk', active: phone ? false : inUse, view }
     : null;
   const key = report && JSON.stringify(report);
   const told = useRef<string | null>(null);
+  const toldShow = useRef<string | null>(null);
+  // In use or presenting: said again now and then – the server forgets it otherwise.
+  const live = !!report && (report.active || !!view?.show);
+  const [beat, setBeat] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    const timer = window.setInterval(() => setBeat((count) => count + 1), COMPANION_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [live]);
 
   useEffect(() => {
     if (!signedIn || !report || !key) return;
-    const again = `${opened}:${key}`;
+    const again = `${opened}:${live ? beat : ''}:${key}`;
     if (told.current === again) return;
-    const timer = window.setTimeout(() => {
-      told.current = again;
-      // Lost (offline, a restart): the next change or reconnect says it again.
-      void api.post('/calls/companion', report).catch(() => undefined);
-    }, SETTLE_MS);
+    // A step of the show is told at once: the phone steps along with it.
+    const shown = JSON.stringify(view?.show ?? null);
+    const timer = window.setTimeout(
+      () => {
+        told.current = again;
+        toldShow.current = shown;
+        // Lost (offline, a restart): the next change or reconnect says it again.
+        void api.post('/calls/companion', report).catch(() => undefined);
+      },
+      shown !== toldShow.current ? 0 : SETTLE_MS,
+    );
     return () => window.clearTimeout(timer);
     // `report` is the same as `key` says.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, opened, signedIn]);
+  }, [key, opened, signedIn, live, beat]);
 }

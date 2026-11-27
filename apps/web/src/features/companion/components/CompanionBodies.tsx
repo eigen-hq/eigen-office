@@ -40,6 +40,7 @@ import { ChatAgents, MailAside, useSenderOrNull } from '@/features/sender';
 import { buildThreads, CommentPreview } from '@/features/viewer';
 import { Avatar, Icon, type ShowToast } from '@/ui';
 import { useCompanionTitle } from '../lib/title';
+import { ShowBody } from './CompanionShow';
 
 /*
  * What the phone beside the computer shows for each kind of page there – the column one has
@@ -72,6 +73,8 @@ export function CompanionBody(props: BodyProps) {
     case 'file':
       return view.id ? <FileBody {...props} id={view.id} /> : <TodayBody />;
     case 'deck':
+      // A slide show running there: the presenter view in the hand.
+      if (view.show) return <ShowBody show={view.show} notify={props.notify} />;
       return view.id ? <DeckBody id={view.id} slideId={view.sub} /> : <TodayBody />;
     case 'document':
       return view.id ? <DocumentBody id={view.id} /> : <TodayBody />;
