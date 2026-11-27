@@ -255,6 +255,13 @@ describe('Calls – in a conversation, heard on every page', () => {
     leaveZombie();
     expect(hub.deskOf('u')).toBeNull();
     expect(hub.command('u', { type: 'open', path: '/w/x' })).toBe(false);
+    // A stream that dropped and came back (same tab): the old one's late leave keeps the new.
+    const leaveOld = hub.connect('u', 'back', () => {}, answers);
+    hub.report('u', { peerId: 'back', device: 'desk', active: true, view });
+    hub.connect('u', 'back', () => {}, answers);
+    leaveOld();
+    expect(hub.deskOf('u')?.view.id).toBe('thread-1');
+    expect(hub.command('u', { type: 'open', path: '/w/x' })).toBe(true);
 
     // Ben answers: he connects to Anna's tab; it rings no more.
     const answered = (await (

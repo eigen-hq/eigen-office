@@ -65,9 +65,12 @@ export class CompanionHub {
     tabs.set(peerId, tab);
     this.deliver(tab, { desk: this.deskOf(userId) });
     return () => {
-      if (tabs.get(peerId) !== tab) return;
-      tabs.delete(peerId);
-      if (tabs.size === 0) this.people.delete(userId);
+      // Only while this stream is still the tab's: one that dropped and came back (same tab, its
+      // entry kept) leaves late, after the new stream took over.
+      const current = this.people.get(userId);
+      if (current?.get(peerId) !== tab || tab.send !== send) return;
+      current.delete(peerId);
+      if (current.size === 0) this.people.delete(userId);
       this.changed(userId);
     };
   }
