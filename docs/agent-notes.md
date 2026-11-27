@@ -3377,6 +3377,12 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
 - Planned (the user, 2026-11-27): releases are also to build an iPhone/iPad and an Android app –
   none exists in the repo yet (no Capacitor/React Native/Expo project). The Mac stays Apple
   Silicon only, for every app (Desktop, Cloud, Writer, Sender): no Intel build is to come back.
+- Container image (2026-11-27): ci.yml job `image` pushes `ghcr.io/root-bert/office:<version>`,
+  `:<major.minor>`, `:latest` (amd64 + arm64, from the smoke caches) in the public repo on a `v*`
+  tag, after verify/image-smoke/secrets. publish.yml must grant the called CI `packages: write`
+  (a called workflow gets no more than its caller; without it the call fails to start). GHCR makes
+  the package private on its first push – set it public once by hand. `deploy/
+  docker-compose.image.yml` (Slider + Postgres, no Caddy) pulls it, for hosts doing HTTPS.
 - Linux: system window frame with the menu bar hidden (Alt shows it, „Datei“ in place of the app
   menu); LibreOffice is never loaded – found at `/usr/bin/soffice`, `/usr/lib*/libreoffice`,
   `/opt/libreoffice*`, `/snap/bin/libreoffice`, else a dialog says to install it with the package
