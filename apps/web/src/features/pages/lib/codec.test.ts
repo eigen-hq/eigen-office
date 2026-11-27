@@ -5,6 +5,7 @@ import {
   createEditor,
   type ElementNode,
   type LexicalEditor,
+  type TextNode,
 } from 'lexical';
 import { $createCodeNode } from '@lexical/code-core';
 import { $createListItemNode, type ListItemNode } from '@lexical/list';
@@ -32,9 +33,12 @@ import {
   $isLiveBlockNode,
   $isPageLinkNode,
   $isRawBlockNode,
+  $createWebCardNode,
+  $createWebChipNode,
   $isWebChipNode,
 } from './nodes';
 import { PAGE_NODES } from './transformers';
+import { $pasteWebAddress } from './web-links';
 import type { Line } from './units';
 
 const ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -207,6 +211,10 @@ describe('page codec', () => {
       '[https://e.example](https://e.example)',
       '',
       '- Liste mit https://f.example',
+      '',
+      '(siehe https://g.example/a) und https://de.wikipedia.org/wiki/Foo_(Bar).',
+      '',
+      'https://de.wikipedia.org/wiki/Foo_(Bar)',
     ];
     const web = opened(WEB);
     expect(written(web.editor, web.codec)).toEqual(lines(WEB));
@@ -228,6 +236,53 @@ describe('page codec', () => {
       'paragraph:https://d.example',
       'paragraph',
       'list',
+      'paragraph:https://g.example/a,https://de.wikipedia.org/wiki/Foo_(Bar)',
+      'page-web-card',
+    ]);
+    // Written so it reads back as itself: words right after a chip, an address not bare-readable.
+    web.editor.update(
+      () => {
+        $getRoot().append(
+          $createParagraphNode().append(
+            $createWebChipNode('https://x.example'),
+            $createTextNode('-Seite, '),
+            $createWebChipNode('https://x.example/a.'),
+            $createTextNode(' und '),
+            $createWebChipNode('https://x.example'),
+            $createTextNode('.'),
+          ),
+          $createWebCardNode('https://x.example/a.'),
+        );
+      },
+      { discrete: true },
+    );
+    expect(web.editor.getEditorState().read($pageMarkdown).split('\n').slice(-3)).toEqual([
+      '<https://x.example>-Seite, <https://x.example/a.> und https://x.example.',
+      '',
+      '<https://x.example/a.>',
+    ]);
+    // ⌘V of an address: over words their link, in code nothing of its own, on an empty line a
+    // card only where it reads back as one.
+    const pasted = opened(['Mehr hier lesen']);
+    const results = [] as boolean[];
+    pasted.editor.update(
+      () => {
+        const words = $getRoot().getFirstChild() as ElementNode;
+        const empty = $createParagraphNode();
+        const code = $createCodeNode().append($createTextNode('code'));
+        $getRoot().append(empty, code);
+        const text = words.getFirstDescendant() as TextNode;
+        results.push($pasteWebAddress(text.select(5, 9), 'https://x.example'));
+        results.push($pasteWebAddress(code.selectEnd(), 'https://x.example'));
+        results.push($pasteWebAddress(empty.selectStart(), 'https://x.example/a.'));
+      },
+      { discrete: true },
+    );
+    expect(results).toEqual([true, false, true]);
+    expect(pasted.editor.getEditorState().read($pageMarkdown).split('\n').slice(0, 3)).toEqual([
+      'Mehr [hier](https://x.example) lesen',
+      '',
+      '<https://x.example/a.>',
     ]);
   });
 

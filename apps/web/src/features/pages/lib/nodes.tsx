@@ -113,6 +113,20 @@ export const $isPageLinkNode = (node: LexicalNode | null | undefined): node is P
 
 // ── Web addresses ───────────────────────────────────────────────────────────
 
+/**
+ * An address written out, as GFM reads one: without what ends a sentence after it, a `)` only
+ * where it closes a `(` in it (`…/Foo_(Bar)` whole, `(siehe https://x.de)` without its `)`).
+ */
+export const WEB_URL = String.raw`https?:\/\/(?:[^\s<>()]|\([^\s<>()]*\))*(?:[^\s<>().,;:!?\]"']|\([^\s<>()]*\))`;
+
+const BARE_WEB_URL = new RegExp(`^${WEB_URL}$`);
+/** All of it read back as the address when written bare (not `…/a.`, not `…)` unopened). */
+export const isBareWebUrl = (url: string) => BARE_WEB_URL.test(url);
+
+const WEB_URL_START = new RegExp(`^${WEB_URL}`);
+/** `url` written bare with `after` behind it reads back as just `url`. */
+const readsBackAs = (url: string, after: string) => WEB_URL_START.exec(url + after)?.[0] === url;
+
 type SerializedWebChip = Spread<{ url: string; pointy: boolean }, SerializedLexicalNode>;
 
 export class WebChipNode extends DecoratorNode<ReactNode> {
@@ -164,10 +178,15 @@ export class WebChipNode extends DecoratorNode<ReactNode> {
     return this.getLatest().__url;
   }
 
-  /** Alone on its line it is written `<…>`: bare there it would be read back as a card. */
+  /**
+   * Written `<…>` where bare it would not read back as itself: alone on its line (a card), not
+   * all of it an address bare (`…/a.`, `…)`), or words right after it (`x.de-Seite`).
+   */
   markdown() {
     const alone = this.getParent()?.getChildrenSize() === 1;
-    return this.__pointy || alone ? `<${this.__url}>` : this.__url;
+    const next = this.getNextSibling()?.getTextContent() ?? '';
+    const bare = !this.__pointy && !alone && readsBackAs(this.__url, next);
+    return bare ? this.__url : `<${this.__url}>`;
   }
 
   override decorate(): ReactNode {
@@ -228,8 +247,9 @@ export class WebCardNode extends DecoratorNode<ReactNode> {
     return this.getLatest().__url;
   }
 
+  /** Bare on its line; one that would not read back bare as itself (`…)`) as its chip. */
   markdown() {
-    return this.__url;
+    return isBareWebUrl(this.__url) ? this.__url : `<${this.__url}>`;
   }
 
   override decorate(): ReactNode {

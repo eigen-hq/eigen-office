@@ -28,6 +28,7 @@ import {
   $createWebChipNode,
   $isWebCardNode,
   $isWebChipNode,
+  WEB_URL,
   CalloutNode,
   DiagramEmbedNode,
   isLiveKind,
@@ -71,9 +72,6 @@ export const PAGE_LINK_TRANSFORMER: TextMatchTransformer = {
     textNode.replace($createPageLinkNode(match[1] as PageLinkKind, match[2]!, match[3]!.trim()));
   },
 };
-
-/** An address written out, without what ends a sentence after it (`lib/links` `loneUrl`). */
-const WEB_URL = String.raw`https?:\/\/[^\s<>]*[^\s<>.,;:!?)\]"']`;
 
 /**
  * A web address alone on its line: its card. Typed it becomes a chip (`WEB_CHIP_TRANSFORMER`) –

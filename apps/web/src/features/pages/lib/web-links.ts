@@ -1,4 +1,4 @@
-import { $createLinkNode, $isLinkNode, type LinkNode } from '@lexical/link';
+import { $createLinkNode, $isLinkNode, $toggleLink, type LinkNode } from '@lexical/link';
 import {
   $createNodeSelection,
   $createParagraphNode,
@@ -11,12 +11,14 @@ import {
   type BaseSelection,
   type LexicalNode,
   type NodeKey,
+  type RangeSelection,
 } from 'lexical';
 import {
   $createWebCardNode,
   $createWebChipNode,
   $isWebCardNode,
   $isWebChipNode,
+  isBareWebUrl,
   type WebChipNode,
 } from './nodes';
 
@@ -129,26 +131,38 @@ export function $setWebLook(target: WebTarget, look: WebLook, title: string | nu
   }
 }
 
+/** In code (a code block, or words formatted as code): an address there stays its letters. */
+function $inCode(selection: RangeSelection): boolean {
+  if (selection.hasFormat('code')) return true;
+  for (const point of [selection.anchor, selection.focus]) {
+    for (let node: LexicalNode | null = point.getNode(); node; node = node.getParent()) {
+      if (node.getType() === 'code') return true;
+    }
+  }
+  return false;
+}
+
 /**
  * A web address put in (⌘V of an address and nothing else): over picked words a link of them, on
- * an empty line its card, in a sentence its chip. `false`: not such a paste – the editor's own.
+ * an empty line its card (where it reads back as one), in a sentence its chip. `false`: not such
+ * a paste – the editor's own (in code too).
  */
 export function $pasteWebAddress(selection: BaseSelection | null, url: string): boolean {
-  if (!$isRangeSelection(selection)) return false;
+  if (!$isRangeSelection(selection) || $inCode(selection)) return false;
   if (!selection.isCollapsed()) {
     if (!selection.getTextContent().trim()) return false;
-    const words = selection.extract();
-    const link = $createLinkNode(url);
-    const first = words[0];
-    if (!first) return false;
-    first.insertBefore(link);
-    for (const word of words) link.append(word);
-    link.selectEnd();
+    // Lexical's own: per block, and the link the words stand in is changed, never nested.
+    $toggleLink(url);
     return true;
   }
   const anchor = selection.anchor.getNode();
   const block = anchor.getTopLevelElement();
-  if (block && block.getType() === 'paragraph' && block.getTextContentSize() === 0) {
+  if (
+    block &&
+    block.getType() === 'paragraph' &&
+    block.getTextContentSize() === 0 &&
+    isBareWebUrl(url)
+  ) {
     const card = $createWebCardNode(url);
     block.replace(card);
     const next = card.getNextSibling();
