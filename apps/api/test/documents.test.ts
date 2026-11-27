@@ -399,6 +399,15 @@ describe('Writer – text documents', () => {
       { id: proposal!.id, status: 'applied', title: document.title, fileName: document.fileName },
     ]);
     expect(await asks(reviewer.cookie)).toEqual([]);
+    // Outside the workspace: 404, as everywhere in it.
+    const stranger = await signedInUser(ctx, { name: 'Fremd', email: 'fremd@anders.de' });
+    expect(
+      (
+        await ctx.request(`/api/workspaces/${ctx.workspaceId}/document-ai-proposals`, {
+          cookie: stranger.cookie,
+        })
+      ).status,
+    ).toBe(404);
     // One left „running“ by a server gone down days ago stays out.
     const old = new Date(ctx.deps.clock.now().getTime() - 2 * 24 * 60 * 60 * 1000);
     const stale = crypto.randomUUID();

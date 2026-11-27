@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   type Attachment,
@@ -36,8 +36,8 @@ import { CONTENT_IS_NOT_INSTRUCTION, promptName, todayForPrompt } from './ai-pro
 import { ATTACHED_FILES_ARE_DATA, attachmentBlocks, withFileNames } from './attachments';
 import { failureMessage, keyProblem, refusesKey, runTurn, type AiConnection } from './ai-providers';
 import { documentBoard } from './board-owner';
-import { authorsOf, authorIn } from './cloud';
-import { documentOf, editDocument, openDocument, type DocumentLive } from './documents';
+import { accessOf, authorsOf, authorIn, cloudContext } from './cloud';
+import { documentOf, editDocument, openDocument, titleOf, type DocumentLive } from './documents';
 import { DIAGRAM_NOTE } from './diagram-prompt';
 import { markKeyRefused, workspaceAiConnection } from './integration-keys';
 import { MATERIAL_TOOL_NAMES, MATERIAL_TOOLS, runMaterialTool } from './material-tools';
@@ -508,48 +508,56 @@ export async function listDocumentAi(
 /** How many of one's asks the side bar lists, and for how long a finished one stays. */
 const ASKS_LISTED = 5;
 const ASK_LISTED_MS = 24 * 60 * 60 * 1000;
+/** Rows read for those: some may lie where one no longer reaches. */
+const ASKS_READ = 4 * ASKS_LISTED;
 
 /**
  * One's own asks of a document AI in the workspace, the latest first: those at work and those
- * finished within the day (one cut short by a restart reads as failed, `toDtos`) – only in documents one still opens and that are not deleted.
+ * finished within the day (one cut short by a restart reads as failed, `toDtos`) – only in
+ * documents one still reaches and that are not deleted. 404 outside the workspace.
  */
 export async function listOwnDocumentAi(
   deps: AppDeps,
   userId: string,
   workspaceId: string,
 ): Promise<WriterAiAsk[]> {
-  const since = new Date(deps.clock.now().getTime() - ASK_LISTED_MS);
+  const ctx = await cloudContext(deps.db, workspaceId, userId);
+  const now = deps.clock.now();
+  const since = new Date(now.getTime() - ASK_LISTED_MS);
   const rows = await deps.db
-    .select({ proposal: documentAiProposals })
+    .select({ proposal: documentAiProposals, node: cloudNodes })
     .from(documentAiProposals)
     .innerJoin(cloudNodes, eq(cloudNodes.id, documentAiProposals.documentId))
     .where(
       and(
         eq(documentAiProposals.createdBy, userId),
         eq(cloudNodes.workspaceId, workspaceId),
+        isNull(cloudNodes.deletedAt),
         // A run is over within `AI_RUNNING_LIMIT_MS`: an older „running“ one died with the server.
         gt(documentAiProposals.updatedAt, since),
       ),
     )
     .orderBy(desc(documentAiProposals.createdAt), desc(documentAiProposals.id))
-    .limit(ASKS_LISTED);
-  const documents = new Map(
-    await Promise.all(
-      [...new Set(rows.map((row) => row.proposal.documentId))].map(
-        async (id) => [id, await documentOf(deps, userId, id).catch(() => null)] as const,
-      ),
-    ),
+    .limit(ASKS_READ);
+  const nodes = new Map(rows.map((row) => [row.node.id, row.node]));
+  const reached = new Set(
+    (
+      await Promise.all(
+        [...nodes.values()].map(async (node) =>
+          (await accessOf(deps.db, ctx, node, now)).access ? node.id : null,
+        ),
+      )
+    ).filter((id): id is string => id !== null),
   );
+  const shown = rows.filter((row) => reached.has(row.node.id)).slice(0, ASKS_LISTED);
   const dtos = await toDtos(
     deps,
     workspaceId,
-    rows.map((row) => row.proposal),
+    shown.map((row) => row.proposal),
   );
-  return dtos.flatMap((dto) => {
-    const document = documents.get(dto.documentId);
-    return document && !document.deletedAt
-      ? [{ ...dto, title: document.title, fileName: document.fileName }]
-      : [];
+  return dtos.map((dto) => {
+    const name = nodes.get(dto.documentId)?.name ?? '';
+    return { ...dto, title: titleOf(name), fileName: name };
   });
 }
 

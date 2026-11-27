@@ -171,7 +171,7 @@ export class DocumentLive {
 const isDocument = (node: Pick<CloudNodeRow, 'kind' | 'extension'>) =>
   node.kind === 'file' && node.extension !== null && WRITER_OPENS.includes(node.extension);
 
-const titleOf = (name: string) => name.replace(/\.(odt|md|markdown)$/i, '');
+export const titleOf = (name: string) => name.replace(/\.(odt|md|markdown)$/i, '');
 
 /** A text document or a Markdown file, as Writer reads and writes it. */
 type TextFile = OdtDocument | MarkdownDocument;
