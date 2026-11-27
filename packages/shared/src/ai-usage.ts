@@ -10,7 +10,7 @@ import { z } from 'zod';
 /**
  * What a request was for – the dashboard names them. `create`: a deck created by the AI;
  * `material`: a question about a deck's material („Fragen“ on the material page); `document`: a
- * comment in a text document handed to the AI; `mail`: a reply the AI wrote into a mail's field;
+ * comment in a text document handed to the AI; `mail`: a reply the AI wrote into a mail's field.
  */
 export const AI_FEATURES = [
   'edit',

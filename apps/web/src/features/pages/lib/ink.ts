@@ -18,7 +18,7 @@ import { getStroke, type StrokeOptions } from 'perfect-freehand';
  * accent), its width and its points as whole numbers, each `x y force` (force 1–100 as the pen
  * pressed; 0 where nothing measured it – a mouse – and the line is thinned by its speed). Longer
  * than a line holds, it goes on in `more` lines of points. `shape`: a form drawn true (a line, a
- * box, a circle), its corners as `x y`. `text`: what the handwriting says, read by the AI for the
+ * box, a circle), its corners as `x y`. `text`: what the handwriting says, read on the device, for the
  * search and the AI (with a mark of the strokes it read). Lines of 1.6.18 – `pen …`/`marker …`,
  * points as `x y` – are read as they are. A line the page does not read is kept as it stands.
  */
