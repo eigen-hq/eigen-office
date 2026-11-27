@@ -97,7 +97,7 @@ export function useSetMeetingNotice() {
   });
 }
 
-/** Einstellungen › Darstellung › „Handy als Begleiter“: by itself, offered, or never. */
+/** Einstellungen › „Handy als Begleiter“: by itself, offered, or never. */
 export function useSetCompanion() {
   const queryClient = useQueryClient();
   const put = (mode: CompanionMode) =>

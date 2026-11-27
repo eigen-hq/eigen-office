@@ -6,7 +6,7 @@ import { callPeerIdSchema, MAX_CALL_HERE } from './calls';
  * what goes with the page there – the panel beside a mail, a chat, an event, a file, the slide's
  * comments, a document's comments, else today – and talks with the workspace's AI about it.
  *
- * Per account (Einstellungen › Darstellung › „Handy als Begleiter“):
+ * Per account (Einstellungen › „Handy als Begleiter“):
  * - `auto`: the phone turns into the companion by itself once the computer is in use,
  * - `ask`: a sign beside the date in the phone's header offers it – one tap,
  * - `never`: neither.

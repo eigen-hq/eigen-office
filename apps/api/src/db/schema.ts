@@ -211,7 +211,7 @@ export const users = pgTable('users', {
    */
   meetingNoticeMinutes: integer('meeting_notice_minutes').default(5),
   /**
-   * The phone beside the computer (Einstellungen › Darstellung › „Handy als Begleiter“, migration
+   * The phone beside the computer (Einstellungen › „Handy als Begleiter“, migration
    * 0198): `auto` turns into it by itself, `ask` offers it beside the date, `never`.
    */
   companion: text('companion').$type<CompanionMode>().notNull().default('auto'),

@@ -3236,15 +3236,16 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   else → coming events + own to-dos. Below it the workspace's AI (`CompanionChat`, Cloud's chat
   with `here`) and the call button in the header; mail and calendar have their own „Nachfragen“,
   so no field below there (`ASKS_ITSELF`).
-- Wire: every tab (`CompanionWatch`, in `router.tsx`) posts `POST /calls/companion` `{peerId,
-  device, active, view}` whenever that changes (page, lines, in front / left; debounced); `CompanionHub` (memory) keeps the
-  newest desktop per user and sends SSE `companion` on the existing `/calls/live`. `view` comes
+- Wire: every tab (`CompanionWatch`, in `router.tsx`) posts `POST /calls/companion`
+  `{peerId, device, active, view}` whenever that changes (page, lines, in front / left;
+  debounced); `CompanionHub` (memory) keeps the newest desktop per user and sends SSE
+  `companion` on the existing `/calls/live`. `view` comes
   from the path (`lib/view.ts` `viewOf`) plus the page's call-here lines (`ownCallHere`) – so the
   agent on the phone knows what the computer shows. Phone = coarse pointer and narrow; the desk is
   „active“ with its tab in front and input in the last 2 min (`COMPANION_RECENT_MS`), „there“ for
   60 min (`COMPANION_GONE_MS`).
-- Setting `users.companion` (`auto` default | `ask` | `never`), Konto › Einstellungen and the
-  agents' `change_settings`. `auto` opens it on the phone only when it lies there (seen, untouched
+- Setting `users.companion` (`auto` default | `ask` | `never`), on `/einstellungen` in its own
+  section „Handy als Begleiter“ and by the agents' `change_settings`. `auto` opens it on the phone only when it lies there (seen, untouched
   20 s, no field focused, no call) and the computer is in use, not again after ✕ until the computer
   was left (`lib/auto.ts` `opensByItself`). `ask` (and `auto` once left): `CompanionButton`, an icon
   left of the date in the header on a phone, green dot while the computer is in use – no pop-up.

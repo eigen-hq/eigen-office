@@ -273,7 +273,7 @@ export const updateMeInputSchema = z
     showExtensions: z.boolean().optional(),
     /** Einstellungen › Kalender: minutes before a meeting it shows in the header; `null`: never. */
     meetingNoticeMinutes: meetingNoticeSchema.optional(),
-    /** Einstellungen › Darstellung: the phone beside the computer – by itself, offered, never. */
+    /** Einstellungen › „Handy als Begleiter“: the phone beside the computer – by itself, offered, never. */
     companion: companionModeSchema.optional(),
   })
   .refine(

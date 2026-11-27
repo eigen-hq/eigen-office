@@ -92,7 +92,7 @@ export async function setShowExtensions(db: Database, userId: string, shown: boo
   await db.update(users).set({ showExtensions: shown }).where(eq(users.id, userId));
 }
 
-/** The phone beside the computer (Einstellungen › Darstellung): by itself, offered, or never. */
+/** The phone beside the computer (Einstellungen › „Handy als Begleiter“): by itself, offered, or never. */
 export async function setCompanion(db: Database, userId: string, mode: CompanionMode) {
   await db.update(users).set({ companion: mode }).where(eq(users.id, userId));
 }

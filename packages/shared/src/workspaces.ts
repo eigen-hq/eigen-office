@@ -195,7 +195,7 @@ export const meUserSchema = z.object({
   showExtensions: z.boolean(),
   /** Minutes before a meeting it shows beside the date in the header; `null`: never. */
   meetingNoticeMinutes: meetingNoticeSchema,
-  /** The phone beside the computer (Einstellungen › Darstellung › „Handy als Begleiter“). */
+  /** The phone beside the computer (Einstellungen › „Handy als Begleiter“). */
   companion: companionModeSchema,
 });
 export type MeUser = z.infer<typeof meUserSchema>;
