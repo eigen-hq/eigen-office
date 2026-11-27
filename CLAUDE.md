@@ -35,7 +35,8 @@ facts go there, not into private agent memory.
 
 - One behaviour everywhere: before building a menu/dialog/shortcut/route, copy how Präsentationen
   do it (`features/reviews/components/DeckActions.tsx`) – label, icon, confirm, toast, keys. Fix
-  siblings in the same go. No new modes.
+  siblings in the same go. No handling special to one place (its own select or edit mode, a
+  question asked only there) – new features are fine.
 - Wording: „Präsentation“ (never „Idee“). Destroying own things = „Löschen“ („X löschen?“, „X
   gelöscht“ where a toast is due); „Entfernen“ only when a link goes and the thing stays. Vendor
   names only where the vendor is meant. Never „·“ between words in our UI – „ | “ („vor 2 Min |
