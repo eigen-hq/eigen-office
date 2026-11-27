@@ -1024,6 +1024,15 @@ one setting for all.
   What the agent does by itself (repeat, watches) is still left out while it works. The field
   (`AgentComposer`) shows „Stoppen“ beside „Senden“ (`working`); `busy` only while an order is
   being placed. The route's 10 asks a minute per person (`aiLimits.materialQuestions`) count.
+- Cloud's side bar row „Agenten“ folds out what is at work (`AgentsGroup` in `CloudSidebar.tsx`,
+  user 2026-11-27: „eine Art Progress-Leiste, wo ich sehe, arbeitet da gerade jemand“): one's
+  agents `running` now (from `SenderHome.agents`, so they stand in the chats below too) and one's
+  own asks of a page's/document's AI from its bar (`GET /workspaces/:id/document-ai-proposals`,
+  `listOwnDocumentAi`: running or finished within 24 h, 5 at most, only documents one still opens
+  and not deleted) – no agent or chat per ask. While any works an `ai-scan-wash` line runs along
+  the row's foot (folded bar too). No stream reaches it: `useOwnAiAsks` polls 2 s while one runs,
+  else 30 s; the page's bar invalidates it on send. An ask on a `.md` opens the page in
+  Bearbeiten with `PAGE_AGENT_STATE` (`PagePage`), its state in the bar; an `.odt` at its comment.
 - „Agenten“ (`/w/:id/dateien/agenten[/:agentId]`, side bar row under „Zuletzt“): an order to the AI
   that runs in the server (`runInBackground`), not in a request – the page only polls (1.5 s
   while `running`, `lib/api/cloud-agents.ts`). Server: `services/cloud-agents.ts` +
