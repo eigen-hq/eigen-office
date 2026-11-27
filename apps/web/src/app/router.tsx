@@ -1,6 +1,7 @@
 import { createBrowserRouter, Outlet } from 'react-router';
 import { CommandKey } from '@/features/commands';
 import { CompanionWatch } from '@/features/companion';
+import { LinkScope } from './LinkScope';
 import { PeoplePicturesSync } from './PeoplePicturesSync';
 import { RouteError } from './RouteError';
 
@@ -15,10 +16,13 @@ import { RouteError } from './RouteError';
 export const router = createBrowserRouter([
   {
     // Every page: the command panel (⌘K), people's pictures for whoever is signed in, and the
-    // phone beside the computer (what the computer shows, the phone turning into its companion).
+    // phone beside the computer (what the computer shows, the phone turning into its companion);
+    // web addresses' cards asked in the workspace the page works in (`LinkScope`).
     element: (
       <>
-        <Outlet />
+        <LinkScope>
+          <Outlet />
+        </LinkScope>
         <CommandKey />
         <PeoplePicturesSync />
         <CompanionWatch />
