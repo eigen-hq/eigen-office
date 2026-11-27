@@ -37,6 +37,7 @@ export function hearCompanion(event: CompanionEvent) {
 /** The call stream (re)opened. */
 export function companionStreamOpened() {
   clearTimeout(lostTimer);
+  lostTimer = undefined;
   set({ ...heard, opened: heard.opened + 1 });
 }
 
@@ -46,8 +47,10 @@ export function companionStreamOpened() {
  * companion on an old word.
  */
 export function companionStreamLost() {
-  clearTimeout(lostTimer);
+  // Counted from the break, once: each retry that fails says it again.
+  if (lostTimer !== undefined) return;
   lostTimer = setTimeout(() => {
+    lostTimer = undefined;
     if (heard.desk) set({ ...heard, desk: null });
   }, LOST_MS);
 }
@@ -67,6 +70,7 @@ export const onCompanionHeard = (listener: () => void): (() => void) => subscrib
 /** For tests: back to nothing heard. */
 export function resetCompanion() {
   clearTimeout(lostTimer);
+  lostTimer = undefined;
   set({ desk: null, opened: 0 });
   setCompanionShow(null);
 }

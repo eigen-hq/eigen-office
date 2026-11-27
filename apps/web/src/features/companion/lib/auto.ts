@@ -13,6 +13,13 @@ export const deskThere = (desk: CompanionDesk | null, now: number): desk is Comp
 export const deskInUse = (desk: CompanionDesk | null, now: number): desk is CompanionDesk =>
   !!desk && (desk.active || now - Date.parse(desk.at) < COMPANION_RECENT_MS);
 
+/**
+ * The computer was left – last seen in use (`inUseAt`) a while ago: the companion left with ✕
+ * opens by itself again. Measured on the phone, not from what the server says now: a desk tab
+ * reloading (none heard a moment) or another, idle tab standing in for it is no leaving.
+ */
+export const deskLeft = (inUseAt: number, now: number) => now - inUseAt >= COMPANION_RECENT_MS;
+
 /** A phone touched this recently is being used: the companion does not take it over. */
 export const BUSY_MS = 20_000;
 

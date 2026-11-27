@@ -1,4 +1,4 @@
-import { COMPANION_RECENT_MS, DEFAULT_COMPANION_MODE } from '@slider/shared';
+import { DEFAULT_COMPANION_MODE } from '@slider/shared';
 import { useEffect, useRef, useState } from 'react';
 import { matchPath, useLocation, useNavigate } from 'react-router';
 import { useCallsOrNull } from '@/features/calls';
@@ -6,7 +6,7 @@ import { useMe } from '@/lib/api';
 import { useCompanionHeard } from '@/lib/companion';
 import { isTextTarget } from '@/lib/dom';
 import { routes } from '@/lib/routes';
-import { deskInUse, opensByItself } from '../lib/auto';
+import { deskInUse, deskLeft, opensByItself } from '../lib/auto';
 import { useDevice } from '../lib/device';
 import { useReportView } from '../lib/report';
 
@@ -33,8 +33,8 @@ const OUTSIDE = [
  * until the computer was left a while and is used anew.
  */
 let dismissed = false;
-/** Since when no computer was heard at all (its tab reloading, a reconnect): `null` while one is. */
-let goneSince: number | null = null;
+/** When this phone last heard the computer in use. */
+let inUseAt = 0;
 export const dismissCompanion = () => {
   dismissed = true;
 };
@@ -94,14 +94,9 @@ export function CompanionWatch() {
 
   useEffect(() => {
     const now = Date.now();
-    // The computer was left: next time it is used, the companion opens again. None heard (its tab
-    // reloading, a reconnect) counts only once that lasts as long.
-    if (desk) goneSince = null;
-    else goneSince ??= now;
-    const left = desk
-      ? !deskInUse(desk, now)
-      : goneSince !== null && now - goneSince >= COMPANION_RECENT_MS;
-    if (left) dismissed = false;
+    // The computer was left: next time it is used, the companion opens again.
+    if (deskInUse(desk, now)) inUseAt = now;
+    if (deskLeft(inUseAt, now)) dismissed = false;
     const open = opensByItself({
       mode,
       desk,

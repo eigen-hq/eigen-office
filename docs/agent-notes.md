@@ -3266,7 +3266,7 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   agent on the phone knows what the computer shows. The desk is „active“ with its tab in front and
   input in the last 2 min (`COMPANION_RECENT_MS`), „there“ for 60 min (`COMPANION_GONE_MS`).
   The hub is in memory: one API process (a second one would split the tabs). Bounded: reports
-  3000/h per user, 20 tabs per user (a new one takes the place of the oldest without its stream),
+  1200 per 10 min per user, 20 tabs per user (a new one takes the place of the oldest without its stream),
   a report whose stream never came is dropped after 2 min unheard. „Nie“: tabs post `view: null`,
   nothing of their page.
 - `lib/device.ts`: phone = coarse pointer and small (< 768 wide or < 500 high); tablet = coarse
@@ -3307,8 +3307,9 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
 - Setting `users.companion` (`auto` default | `ask` | `never`), on `/einstellungen` in its own
   section „Handy als Begleiter“ and by the agents' `change_settings`. `auto` opens it on the phone only when it lies there (seen, untouched
   20 s, no field focused, no call) and the computer is in use, not again after ✕ until the computer
-  was left (`lib/auto.ts` `opensByItself`) – no desk heard counts as left only after 2 min (a
-  desk tab reloading sends `desk: null` for a moment). A broken stream forgets the desk after
+  was left (`lib/auto.ts` `opensByItself`) – left = not heard in use for 2 min (`deskLeft`, timed
+  on the phone: a desk tab reloading sends `desk: null` a moment, or the hub falls back to an
+  idle tab with an old `at`). A broken stream forgets the desk after
   15 s without reconnect (`companionStreamLost`). `ask` (and `auto` once left): `CompanionButton`, an icon
   left of the date in the header on a phone, green dot while the computer is in use – no pop-up.
 - Screen Wake Lock (`lib/wake-lock.ts`) only while the computer is there; re-taken on

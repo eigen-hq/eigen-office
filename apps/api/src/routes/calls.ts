@@ -70,7 +70,7 @@ export function callRoutes(
   // A talk of an hour stepped on from the phone: a few hundred steps.
   const commandWindow = fixedWindow({ limit: 1_200, windowMs: HOUR_MS, clock: deps.clock });
   // Each tab says it on every change, settled, and once a minute while in use.
-  const reportWindow = fixedWindow({ limit: 3_000, windowMs: HOUR_MS, clock: deps.clock });
+  const reportWindow = fixedWindow({ limit: 1_200, windowMs: 10 * 60_000, clock: deps.clock });
   const lives = createMiddleware<ViewerEnv>(async (c, next) => {
     assertWithinLimit(
       c,

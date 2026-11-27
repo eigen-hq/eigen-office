@@ -6,7 +6,7 @@ import {
   companionStreamOpened,
   hearCompanion,
 } from '@/lib/companion';
-import { offered, opensByItself, type AutoState } from './auto';
+import { deskLeft, offered, opensByItself, type AutoState } from './auto';
 import { deskShows } from './command';
 import { viewOf } from './view';
 
@@ -109,6 +109,10 @@ describe('companion', () => {
     expect(offered({ ...lying, mode: 'never' })).toBe(false);
     expect(offered({ ...lying, shown: true })).toBe(false);
 
+    // Left with ✕: opens again only once the computer was not in use for a while.
+    expect(deskLeft(NOW - 60_000, NOW)).toBe(false);
+    expect(deskLeft(NOW - 2 * 60_000, NOW)).toBe(true);
+
     // „Am Computer öffnen“ counts as done once the computer shows that page (more of its own in
     // the search is fine), not on the server's word alone.
     const there = (path: string) => ({ ...desk(true, 0), view: { ...desk(true, 0).view, path } });
@@ -126,8 +130,11 @@ describe('companion', () => {
     companionStreamOpened();
     vi.advanceTimersByTime(10_000);
     expect(companionHeard().desk).not.toBeNull();
+    // Each failed retry says it again: counted from the break all the same.
     companionStreamLost();
-    vi.advanceTimersByTime(15_000);
+    vi.advanceTimersByTime(10_000);
+    companionStreamLost();
+    vi.advanceTimersByTime(5_000);
     expect(companionHeard().desk).toBeNull();
     vi.useRealTimers();
   });
