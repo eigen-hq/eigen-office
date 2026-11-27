@@ -256,6 +256,13 @@ describe('data export (BER-145)', () => {
     expect((await notice(null)).status).toBe(200);
     expect((await meNow())?.meetingNoticeMinutes).toBeNull();
     expect((await notice(15)).status).toBe(200);
+    // „Handy als Begleiter“: „Automatisch“ until changed, only its three ways.
+    expect((await meNow())?.companion).toBe('auto');
+    const companion = (mode: string) =>
+      ctx.request('/api/me', { method: 'PATCH', json: { companion: mode }, cookie: person.cookie });
+    expect((await companion('immer')).status).toBe(400);
+    expect((await companion('ask')).status).toBe(200);
+    expect((await meNow())?.companion).toBe('ask');
     const own = await createReadyDeck(ctx, { title: 'Annas Deck' });
     const pptxKey = blobKeys.pptx(own.deckId, own.revisionId);
     await ctx.deps.storage.put(pptxKey, new TextEncoder().encode('PPTX'));
@@ -660,6 +667,7 @@ describe('data export (BER-145)', () => {
       callVoice: 'paul',
       showExtensions: true,
       meetingNoticeMinutes: 15,
+      companion: 'ask',
     });
     expect(account.workspaces).toEqual([
       expect.objectContaining({ id: ctx.workspaceId, role: 'member' }),

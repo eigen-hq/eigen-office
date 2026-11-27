@@ -1387,6 +1387,13 @@
       "when": 1801828800000,
       "tag": "0197_calendar_series_root_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1801915200000,
+      "tag": "0198_user_companion",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { meetingNoticeSchema } from './calendar';
+import { companionModeSchema } from './companion';
 import { accentColorSchema, templateColorsSchema, workspaceRoleSchema } from './model';
 
 /**
@@ -194,6 +195,8 @@ export const meUserSchema = z.object({
   showExtensions: z.boolean(),
   /** Minutes before a meeting it shows beside the date in the header; `null`: never. */
   meetingNoticeMinutes: meetingNoticeSchema,
+  /** The phone beside the computer (Einstellungen › Darstellung › „Handy als Begleiter“). */
+  companion: companionModeSchema,
 });
 export type MeUser = z.infer<typeof meUserSchema>;
 

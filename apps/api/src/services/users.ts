@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import type { AccentColor, Viewer } from '@slider/shared';
+import type { AccentColor, CompanionMode, Viewer } from '@slider/shared';
 import type { Database, Executor } from '../db/client';
 import { comments, users, type UserRow } from '../db/schema';
 
@@ -90,6 +90,11 @@ export async function updateViewerColor(
 /** Einstellungen › Dateien › „Dateiendungen zeigen“: Cloud's file names with their ending. */
 export async function setShowExtensions(db: Database, userId: string, shown: boolean) {
   await db.update(users).set({ showExtensions: shown }).where(eq(users.id, userId));
+}
+
+/** The phone beside the computer (Einstellungen › Darstellung): by itself, offered, or never. */
+export async function setCompanion(db: Database, userId: string, mode: CompanionMode) {
+  await db.update(users).set({ companion: mode }).where(eq(users.id, userId));
 }
 
 /** Minutes before a meeting it shows in the header (Einstellungen › Kalender); `null`: never. */

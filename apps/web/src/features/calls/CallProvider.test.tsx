@@ -121,6 +121,7 @@ describe('CallProvider', () => {
         isInstanceAdmin: false,
         showExtensions: false,
         meetingNoticeMinutes: 5,
+        companion: 'auto',
       },
       workspaces: [],
     } as Partial<MeResponse>);

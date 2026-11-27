@@ -48,6 +48,7 @@ export * from './writer-ai';
 export * from './reader';
 export * from './sender';
 export * from './calls';
+export * from './companion';
 export * from './mail';
 export * from './todos';
 export * from './calendar';

@@ -1,9 +1,12 @@
 import {
   ACCENT_COLORS,
   accentColorSchema,
+  COMPANION_MODES,
+  companionModeSchema,
   MAIL_SYNC_MINUTES,
   MEETING_NOTICE_CHOICES,
   USER_NAME_MAX,
+  type CompanionMode,
   type Viewer,
 } from '@slider/shared';
 import { eq } from 'drizzle-orm';
@@ -14,7 +17,13 @@ import { ApiError } from '../http/errors';
 import { callVoices, pickCallVoice } from './call-voices';
 import { mailSyncOf, setMailSync } from './mail';
 import { ToolChatError } from './tool-chat';
-import { setShowExtensions, setMeetingNotice, updateViewerColor, updateViewerName } from './users';
+import {
+  setCompanion,
+  setMeetingNotice,
+  setShowExtensions,
+  updateViewerColor,
+  updateViewerName,
+} from './users';
 
 /**
  * The person's own settings an agent or a connected app may read and change for them – those kept
@@ -44,14 +53,15 @@ export const SETTINGS_INPUTS = {
           message: `One of ${MEETING_NOTICE_CHOICES.map(String).join(', ')}.`,
         })
         .optional(),
+      companion: companionModeSchema.optional(),
     })
     .passthrough(),
 } as const;
 export type SettingsToolName = keyof typeof SETTINGS_INPUTS;
 
 const READ_DESCRIPTION =
-  "The person's own settings: their name and colour (others see them by it), the voice agents speak with in their calls (and those to pick from), how often their mailboxes are checked, whether Cloud's file names show their ending, how long before a meeting it shows beside the date in the header. Says too what only the person sets, in their browser, and where.";
-const CHANGE_DESCRIPTION = `Changes the person's own settings – only the fields given, only when they ask for it: name (others see it, on their comments too), color (${ACCENT_COLORS.join(', ')}), call_voice (a voice id from read_settings; null: the automatic one), mail_check_minutes (${MAIL_SYNC_MINUTES.join(', ')} – 0: only when they pull the mail list down), show_extensions (true: „Bericht.pdf“ in Cloud's lists, false: „Bericht“), meeting_notice_minutes (${MEETING_NOTICE_CHOICES.map(String).join(', ')} – minutes before a meeting it shows beside the date in the header with „Beitreten“; null: never). A mailbox's own settings: update_mailbox; an area's: update_area.`;
+  "The person's own settings: their name and colour (others see them by it), the voice agents speak with in their calls (and those to pick from), how often their mailboxes are checked, whether Cloud's file names show their ending, how long before a meeting it shows beside the date in the header, whether the phone turns into a companion of the computer. Says too what only the person sets, in their browser, and where.";
+const CHANGE_DESCRIPTION = `Changes the person's own settings – only the fields given, only when they ask for it: name (others see it, on their comments too), color (${ACCENT_COLORS.join(', ')}), call_voice (a voice id from read_settings; null: the automatic one), mail_check_minutes (${MAIL_SYNC_MINUTES.join(', ')} – 0: only when they pull the mail list down), show_extensions (true: „Bericht.pdf“ in Cloud's lists, false: „Bericht“), meeting_notice_minutes (${MEETING_NOTICE_CHOICES.map(String).join(', ')} – minutes before a meeting it shows beside the date in the header with „Beitreten“; null: never), companion (auto: the phone beside the computer shows what goes with its page by itself, ask: a sign in the phone's header offers it, never). A mailbox's own settings: update_mailbox; an area's: update_area.`;
 
 export const SETTINGS_TOOLS = [
   {
@@ -74,6 +84,7 @@ export const SETTINGS_TOOLS = [
           type: ['integer', 'null'],
           enum: [...MEETING_NOTICE_CHOICES],
         },
+        companion: { type: 'string', enum: [...COMPANION_MODES] },
       },
     },
   },
@@ -84,6 +95,13 @@ const BROWSER_ONLY =
 
 const noticeWord = (minutes: number | null) =>
   minutes === null ? 'never in the header' : `${minutes} min before in the header`;
+
+const companionWord = (mode: CompanionMode) =>
+  mode === 'auto'
+    ? 'the phone turns into the companion by itself while the computer is in use'
+    : mode === 'ask'
+      ? "a sign in the phone's header offers it"
+      : 'never';
 
 const minutesWord = (minutes: number) =>
   minutes === 0 ? 'only when they pull the mail list down' : minutes === 1 ? 'every minute' : `every ${minutes} minutes`;
@@ -107,6 +125,7 @@ export async function runSettingsTool(
         .select({
           showExtensions: users.showExtensions,
           meetingNoticeMinutes: users.meetingNoticeMinutes,
+          companion: users.companion,
         })
         .from(users)
         .where(eq(users.id, userId)),
@@ -125,6 +144,7 @@ export async function runSettingsTool(
       `mail_check_minutes: ${sync.minutes} (${minutesWord(sync.minutes)})`,
       `show_extensions: ${user?.showExtensions ?? false} (Cloud's file names ${user?.showExtensions ? 'with' : 'without'} their ending)`,
       `meeting_notice_minutes: ${user?.meetingNoticeMinutes ?? null} (${noticeWord(user?.meetingNoticeMinutes ?? null)})`,
+      `companion: ${user?.companion ?? 'auto'} (${companionWord(user?.companion ?? 'auto')})`,
       BROWSER_ONLY,
     ].join('\n');
   }
@@ -135,10 +155,11 @@ export async function runSettingsTool(
     input.call_voice === undefined &&
     input.mail_check_minutes === undefined &&
     input.show_extensions === undefined &&
-    input.meeting_notice_minutes === undefined
+    input.meeting_notice_minutes === undefined &&
+    input.companion === undefined
   )
     throw new ToolChatError(
-      'Say what to change: name, color, call_voice, mail_check_minutes, show_extensions or meeting_notice_minutes. ' +
+      'Say what to change: name, color, call_voice, mail_check_minutes, show_extensions, meeting_notice_minutes or companion. ' +
         BROWSER_ONLY,
     );
   const done: string[] = [];
@@ -172,6 +193,10 @@ export async function runSettingsTool(
   if (input.meeting_notice_minutes !== undefined) {
     await setMeetingNotice(deps.db, userId, input.meeting_notice_minutes);
     done.push(`meetings shown ${noticeWord(input.meeting_notice_minutes)}`);
+  }
+  if (input.companion !== undefined) {
+    await setCompanion(deps.db, userId, input.companion);
+    done.push(`phone as companion: ${companionWord(input.companion)}`);
   }
   return done.length ? `Changed: ${done.join(', ')}.` : 'Nothing was different.';
 }

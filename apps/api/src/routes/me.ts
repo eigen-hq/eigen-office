@@ -25,6 +25,7 @@ import { exportAccount } from '../services/account-export';
 import {
   setShowExtensions,
   setMeetingNotice,
+  setCompanion,
   updateViewerColor,
   updateViewerName,
 } from '../services/users';
@@ -64,6 +65,7 @@ async function meResponse(
       isInstanceAdmin: user.isInstanceAdmin,
       showExtensions: user.showExtensions,
       meetingNoticeMinutes: user.meetingNoticeMinutes,
+      companion: user.companion,
     },
     workspaces,
     pendingInvites,
@@ -97,7 +99,7 @@ export function meRoutes(deps: AppDeps, gate: InstanceGate) {
         c.json<MeResponse>(await meResponse(deps, gate, c, c.var.viewer)),
       )
       .patch('/me', viewerMiddleware(deps), async (c) => {
-        const { color, name, showExtensions, meetingNoticeMinutes } = await readJson(
+        const { color, name, showExtensions, meetingNoticeMinutes, companion } = await readJson(
           c,
           updateMeInputSchema,
         );
@@ -107,6 +109,7 @@ export function meRoutes(deps: AppDeps, gate: InstanceGate) {
           await setShowExtensions(deps.db, viewer.author.id, showExtensions);
         if (meetingNoticeMinutes !== undefined)
           await setMeetingNotice(deps.db, viewer.author.id, meetingNoticeMinutes);
+        if (companion !== undefined) await setCompanion(deps.db, viewer.author.id, companion);
         if (name && name !== viewer.author.name) {
           const renamed = await updateViewerName(deps.db, viewer, name);
           viewer = renamed.viewer;

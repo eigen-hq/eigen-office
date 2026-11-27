@@ -105,6 +105,7 @@ import type {
   TodoPriority,
   TodoSource,
   TodoStatus,
+  CompanionMode,
 } from '@slider/shared';
 import { encryptedJson, encryptedJsonList, encryptedText } from './encrypted-columns';
 import type { PdfMaker } from '../import/pdf-maker';
@@ -209,6 +210,11 @@ export const users = pgTable('users', {
    * Kalender, migration 0190); `null`: never.
    */
   meetingNoticeMinutes: integer('meeting_notice_minutes').default(5),
+  /**
+   * The phone beside the computer (Einstellungen › Darstellung › „Handy als Begleiter“, migration
+   * 0198): `auto` turns into it by itself, `ask` offers it beside the date, `never`.
+   */
+  companion: text('companion').$type<CompanionMode>().notNull().default('auto'),
 });
 
 /**

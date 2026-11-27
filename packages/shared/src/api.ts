@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { meetingNoticeSchema } from './calendar';
+import { companionModeSchema } from './companion';
 import {
   accentColorSchema,
   anchorSchema,
@@ -272,13 +273,16 @@ export const updateMeInputSchema = z
     showExtensions: z.boolean().optional(),
     /** Einstellungen › Kalender: minutes before a meeting it shows in the header; `null`: never. */
     meetingNoticeMinutes: meetingNoticeSchema.optional(),
+    /** Einstellungen › Darstellung: the phone beside the computer – by itself, offered, never. */
+    companion: companionModeSchema.optional(),
   })
   .refine(
     (input) =>
       input.color !== undefined ||
       input.name !== undefined ||
       input.showExtensions !== undefined ||
-      input.meetingNoticeMinutes !== undefined,
+      input.meetingNoticeMinutes !== undefined ||
+      input.companion !== undefined,
     { message: 'Nichts zu ändern.' },
   );
 export type UpdateMeInput = z.infer<typeof updateMeInputSchema>;

@@ -323,6 +323,7 @@ async function buildExport(
         mailSyncMinutes: user.mailSyncMinutes,
         showExtensions: user.showExtensions,
         meetingNoticeMinutes: user.meetingNoticeMinutes,
+        companion: user.companion,
         instanceAdmin: user.isInstanceAdmin,
         createdAt: user.createdAt.toISOString(),
         lastActiveAt: user.lastActiveAt.toISOString(),

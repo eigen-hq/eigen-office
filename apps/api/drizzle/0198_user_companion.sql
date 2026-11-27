@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "companion" text DEFAULT 'auto' NOT NULL;
