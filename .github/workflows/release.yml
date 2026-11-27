@@ -81,8 +81,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }},ignore-error=true
       - name: Keep the digest
         run: |
+          # Without its „sha256:“ – an artifact's file name may hold no colon (v0.1.1).
           mkdir -p "$RUNNER_TEMP/digests"
-          touch "$RUNNER_TEMP/digests/${{ steps.build.outputs.digest }}"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
           ls "$RUNNER_TEMP/digests"
       - uses: actions/upload-artifact@v4
         with:
@@ -116,7 +118,7 @@ jobs:
           version=${TAG#v}
           docker buildx imagetools create \
             -t "$image:$version" -t "$image:${version%.*}" -t "$image:latest" \
-            $(printf "$image@%s " *)
+            $(printf "$image@sha256:%s " *)
           docker buildx imagetools inspect "$image:$version"
 
   # The desktop app (desktop/), each build on a runner of its own system and architecture: the
