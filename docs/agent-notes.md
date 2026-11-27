@@ -3545,10 +3545,26 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   loads in the view; camera and microphone only for the server's origin; downloads go to the
   share sheet; `window.sliderInk` is a user script in the page world answering through
   `WKScriptMessageHandlerWithReply`, main frame of the own origin only.
+- Pencil (`OfficeWebView.swift`, web side `lib/pen.ts`, `PenCatcher.tsx`): the double tap as the
+  iPad is set (Settings › Apple Pencil) goes to the page as `sliderpenciltap` – „Radierer“ to the
+  eraser and back to the tool before, „Letztes Werkzeug“ to the tool before, the rest (palette,
+  off) nothing; iOS 17.5's `didReceiveTap`, the older `pencilInteractionDidTap` only below it (both
+  would toggle twice). A page the Pencil draws on (`PenCatcher`, editable or to be) says so through
+  `sliderInk.pencilDraws(true)` – not while a field has the focus, Scribble writes there – and the
+  app's `UIScribbleInteraction` refuses Scribble meanwhile; a new page starts at false. Whether a
+  `UIScribbleInteraction` on the `WKWebView` governs WebKit's content view is unproven (no Pencil
+  in the simulator) – the page's `preventDefault` on stylus touches stays what keeps Scribble out.
+  Proven in the simulator: the tap reaches the page (`OFFICE_PENCIL_PROBE`), a page in
+  Bearbeiten says `pencilDraws` true on its own, false while its field has the focus
+  (`OFFICE_PENCIL_DRAWS`). On a device still to see: one double tap
+  switches once, Scribble stays out of drawings, Scribble writes in a field tapped into.
+- Icon: Cloud's Icon Composer document (`brand/logo/icon/Cloud.icon`, the web app's own icon in
+  `index.html`), taken from there by `project.yml` – no copy; Xcode writes the PNGs older iPadOS
+  needs.
 - Handwriting (`InkReading.swift`): each line drawn as a picture (black on white, 160 px tall,
   round caps), Apple's Vision (`VNRecognizeTextRequest`, accurate, `de` → `de-DE`), pieces in
-  reading order (rows top down, each left to right) – offline, built into iPadOS, nothing sent anywhere. Chosen over ML Kit: its iOS
-  pod has no arm64-simulator slice (cannot run in the simulator on Apple silicon), downloads its
+  reading order (rows top down, each left to right) – offline, built into iPadOS, nothing sent
+  anywhere. Chosen over ML Kit: its iOS pod has no arm64-simulator slice (cannot run in the simulator on Apple silicon), downloads its
   model from Google and sends Google usage data (device, app id, languages, events; no opt-out
   documented). Behind `HandwritingReader`, so another reader can take its place. Tried with
   Hershey script strokes through the real path (renderer → Vision → bridge → JS): some lines read
@@ -3556,17 +3572,26 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   Vision reads pictures, not strokes; real Pencil writing is only tried on an iPad, and if it reads
   as poorly, ML Kit (strokes) is the reader to try.
 - Trying it in the simulator (`Probe.swift`, DEBUG only, `SIMCTL_CHILD_…` env on `simctl
-  launch`; build with `CODE_SIGN_IDENTITY=-` – unsigned, the keychain keeps nothing): `OFFICE_SIGN_IN_TO=<server>` starts signing in, `OFFICE_NO_BROWSER` prints
+  launch`; build with `CODE_SIGN_IDENTITY=-` – unsigned, the keychain keeps nothing):
+  `OFFICE_SIGN_IN_TO=<server>` starts signing in, `OFFICE_NO_BROWSER` prints
   `OFFICE_SIGN_IN <url>` instead of the sheet – post its `challenge` to `/api/auth/desktop/code`
   (a dev-login scratch server answers without a cookie) and write
   `slider-tablet://auth?code=…&state=…` to `OFFICE_CALLBACK_FILE` (the simulator asks before
   opening a scheme, no test can tap); `OFFICE_INK_PROBE=<lines.json>` asks `window.sliderInk` once
   the page loads (`OFFICE_INK […]`); `OFFICE_SIGN_OUT_PROBE` then goes to `/login`; `OFFICE_COOKIE_PROBE` prints the cookie an
-  https server would get. Note a
-  dev-login server signs in every request from this machine – `OFFICE_COOKIES` shows the cookie
+  https server would get; `OFFICE_PENCIL_PROBE` double-taps once the page loads; `OFFICE_OPEN=<path>`
+  goes on from the start page to a page (create one with curl at
+  `/api/workspaces/:id/cloud/files?name=X.md`, open `/w/:id/dateien/seite/:node?neu`),
+  `OFFICE_FOCUS_PROBE` focuses its first field and leaves it. Note a dev-login
+  server signs in every request from this machine – `OFFICE_COOKIES` shows the cookie
   was set, the page alone proves nothing.
-- Needs the server's web app from after 1.6.18 (`app=tablet`, `window.sliderInk` reading) – the
-  hosted instance only once released. Not done: Pencil double-tap (eraser), turning Scribble off
-  over drawings, an icon, Android; „Weiteres Konto hinzufügen“ (`/login?add=1`) stays in the web
+- Needs the server's web app from after 0.1.0 (`app=tablet`, `window.sliderInk` reading, the
+  Pencil's double tap) – the hosted instance only once released. „Weiteres Konto hinzufügen“ (`/login?add=1`) stays in the web
   view (no sign-out), where Google's login refuses it. Never run in the simulator: the real
   Safari sheet (`browse()`) – the first thing to try on a device.
+- Android: not built, an open question for the owner. Chrome 145 there has no handwriting
+  recognition (`createHandwritingRecognizer` absent, tried on the emulator; its WebView not
+  tried), so reading a drawing on an Android tablet needs an installed app with ML Kit – which
+  sends Google usage data (no opt-out documented). Decided so far: no ML Kit without the owner's
+  yes; until then Android reads nothing (the drawing stays a drawing, no „Als Text kopieren“ or
+  „In Text umwandeln“).
