@@ -61,12 +61,13 @@ const agentsOf = (value: unknown): Record<string, string> =>
  */
 function useMailAgent(threadId: string) {
   const [all, keep] = useKept(KEPT_MAIL_AGENTS, 'slider.mail.agents', agentsOf, NO_AGENTS);
-  const set = (agentId: string | null) => {
-    const { [threadId]: _gone, ...rest } = all;
-    const entries = Object.entries(rest);
-    if (agentId) entries.push([threadId, agentId]);
-    keep(Object.fromEntries(entries.slice(-MAX_KEPT_MAIL_AGENTS)));
-  };
+  const set = (agentId: string | null) =>
+    keep((current) => {
+      const { [threadId]: _gone, ...rest } = current;
+      const entries = Object.entries(rest);
+      if (agentId) entries.push([threadId, agentId]);
+      return Object.fromEntries(entries.slice(-MAX_KEPT_MAIL_AGENTS));
+    });
   return [all[threadId] ?? null, set] as const;
 }
 

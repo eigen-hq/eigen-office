@@ -16,14 +16,15 @@ const keptPath = (key: string) => `/me/kept/${encodeURIComponent(key)}`;
  * (per account – several can be signed in here), shown at once while the server is asked and kept
  * in step with it. What the browser kept alone before, under `local` itself, goes up once – only
  * where no other account is signed in here (whose it was is unknown otherwise). A change shows at
- * once and is sent behind it.
+ * once and is sent behind it – applied to what the server keeps right then, so a change made on
+ * the other device meanwhile (the phone beside the computer) is not overwritten.
  */
 export function useKept<T>(
   key: string,
   local: string,
   parse: (value: unknown) => T,
   fallback: T,
-): [T, (next: T) => void] {
+): [T, (change: (current: T) => T) => void] {
   const queryClient = useQueryClient();
   const userId = useMe().data?.user?.id ?? null;
   const own = userId ? `${local}:${userId}` : null;
@@ -37,9 +38,28 @@ export function useKept<T>(
     // This browser's copy is shown, never trusted: the server is asked at once.
     initialDataUpdatedAt: 0,
   });
+  const read = (value: unknown): T => {
+    if (value === null || value === undefined) return fallback;
+    try {
+      return parse(value);
+    } catch {
+      return fallback;
+    }
+  };
+  const mutationKey = ['kept-write', ...queryKey];
   const send = useMutation({
+    mutationKey,
     scope: { id: `kept:${key}` },
-    mutationFn: (value: T) => api.put<KeptResponse>(keptPath(key), { value }),
+    // One after the other (`scope`), each on what the server keeps by then.
+    mutationFn: async (change: (current: T) => T) => {
+      const now = read((await api.get<KeptResponse>(keptPath(key))).value);
+      return (await api.put<KeptResponse>(keptPath(key), { value: change(now) })).value;
+    },
+    onSuccess: (value) => {
+      // Another change still on its way shows its own value till it is through.
+      if (queryClient.isMutating({ mutationKey }) > 1) return;
+      queryClient.setQueryData(queryKey, value);
+    },
     // Refused (a value too big, offline): what the server keeps comes back.
     onError: () => void queryClient.invalidateQueries({ queryKey }),
   });
@@ -60,28 +80,22 @@ export function useKept<T>(
       const before = readJson<T>(local, parse, fallback);
       queryClient.setQueryData(queryKey, before);
       writeJson(own, before);
-      send.mutate(before);
+      send.mutate(() => before);
       writeString(local, null);
     }
     // Once the server answered (and when what it keeps changes) – not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [own, fetched, data, others.data]);
-  const value = useMemo(() => {
-    if (data === null || data === undefined) return fallback;
-    try {
-      return parse(data);
-    } catch {
-      return fallback;
-    }
-    // `parse` and `fallback` are the caller's constants.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
-  const set = (next: T) => {
+  // `parse` and `fallback` are the caller's constants.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const value = useMemo(() => read(data), [data]);
+  const set = (change: (current: T) => T) => {
     // An answer still on its way is older than this: it must not overwrite it.
     void queryClient.cancelQueries({ queryKey });
+    const next = change(read(queryClient.getQueryData(queryKey)));
     queryClient.setQueryData(queryKey, next);
     if (own) writeJson(own, next);
-    send.mutate(next);
+    send.mutate(change);
   };
   return [value, set];
 }

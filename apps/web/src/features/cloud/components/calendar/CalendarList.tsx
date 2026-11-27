@@ -45,12 +45,13 @@ export function useHiddenCalendars(workspaceId: string) {
     NONE_HIDDEN,
   );
   const hidden = useMemo<ReadonlySet<string>>(() => new Set(list), [list]);
-  const toggle = (id: string) => {
-    const next = new Set(hidden);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    keep([...next].slice(-MAX_KEPT_HIDDEN_CALENDARS));
-  };
+  const toggle = (id: string) =>
+    keep((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return [...next].slice(-MAX_KEPT_HIDDEN_CALENDARS);
+    });
   return { hidden, toggle };
 }
 
