@@ -45,6 +45,21 @@ export type CompanionKind = z.infer<typeof companionKindSchema>;
 
 const idSchema = z.string().min(1).max(200).nullable();
 
+/**
+ * A slide show running on the computer (presenter view, the show, the audience's window): where
+ * it is – the phone shows the notes, the next slide, the time and steps it on.
+ */
+export const companionShowSchema = z.object({
+  deckId: z.string().min(1).max(200),
+  /** The slide shown; `null` with `ended`: the black end screen. */
+  slideId: idSchema,
+  ended: z.boolean(),
+  black: z.boolean(),
+  /** When the show began (ISO) – the phone's stopwatch. */
+  startedAt: z.iso.datetime(),
+});
+export type CompanionShow = z.infer<typeof companionShowSchema>;
+
 export const companionViewSchema = z.object({
   kind: companionKindSchema,
   workspaceId: idSchema,
@@ -59,8 +74,38 @@ export const companionViewSchema = z.object({
    * AI is asked with it, as if one asked on the computer.
    */
   here: z.string().max(MAX_CALL_HERE),
+  /** A slide show running there. */
+  show: companionShowSchema.nullable().optional(),
 });
 export type CompanionView = z.infer<typeof companionViewSchema>;
+
+/** An address of the app itself: one `/` (never `//`, a host), no scheme. */
+export const companionPathSchema = z
+  .string()
+  .min(1)
+  .max(1000)
+  .regex(/^\/(?![/\\])/);
+
+/**
+ * What the phone asks the computer to do (`POST /calls/companion/command`) – steps of a slide
+ * show and opening a page, nothing else: nothing that changes or deletes. The server hands it to
+ * the one computer tab the phone shows, of the same person.
+ */
+export const companionCommandSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('show'),
+    deckId: z.string().min(1).max(200),
+    action: z.enum(['next', 'prev', 'black']),
+    /** The slide the phone saw when pressed: a computer elsewhere already ignores it. */
+    from: idSchema,
+  }),
+  /** „Am Computer öffnen“. */
+  z.object({ type: z.literal('open'), path: companionPathSchema }),
+]);
+export type CompanionCommand = z.infer<typeof companionCommandSchema>;
+
+/** The SSE event the one computer tab hears a command on (`/calls/live`). */
+export const COMPANION_COMMAND_SSE_EVENT = 'companion-command';
 
 /** `POST /calls/companion`: a tab says what it is and what it shows – on every change. */
 export const companionReportSchema = z.object({
@@ -96,5 +141,11 @@ export interface CompanionEvent {
 
 /** The computer counts as in use this long after its tab was last in front or changed. */
 export const COMPANION_RECENT_MS = 2 * 60_000;
+/**
+ * A computer tab in use or presenting says so again this often (its report unchanged): a tab that
+ * stops saying it – gone without its stream noticing (a lid closed, a proxy holding on) – soon
+ * counts as in use no more and gives way to the one really worked at.
+ */
+export const COMPANION_REFRESH_MS = 60_000;
 /** A computer left alone this long is gone for the phone (the companion closes). */
 export const COMPANION_GONE_MS = 60 * 60_000;

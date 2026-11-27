@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { createMiddleware } from 'hono/factory';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
@@ -15,14 +16,16 @@ import {
   callHushSchema,
   callTranscriptSchema,
   companionReportSchema,
+  COMPANION_COMMAND_SSE_EVENT,
   COMPANION_SSE_EVENT,
+  companionCommandSchema,
   MAX_CALL_UTTERANCE,
   type AccountAuthor,
 } from '@slider/shared';
 import { requireOwner } from '../auth/access';
 import { resolveViewer, viewerMiddleware, type ViewerEnv } from '../auth/viewer';
 import type { AppDeps } from '../deps';
-import { ApiError, badRequest } from '../http/errors';
+import { ApiError, badRequest, notFound } from '../http/errors';
 import { assertWithinLimit, fixedWindow } from '../http/rate-limit';
 import { readJson } from '../http/validate';
 import type { CallHub } from '../services/calls';
@@ -64,6 +67,8 @@ export function callRoutes(
   // a turn every few seconds while someone speaks for an hour – each on the workspace's keys.
   const liveWindow = fixedWindow({ limit: 240, windowMs: HOUR_MS, clock: deps.clock });
   const turnWindow = fixedWindow({ limit: 1_500, windowMs: HOUR_MS, clock: deps.clock });
+  // A talk of an hour stepped on from the phone: a few hundred steps.
+  const commandWindow = fixedWindow({ limit: 1_200, windowMs: HOUR_MS, clock: deps.clock });
   const lives = createMiddleware<ViewerEnv>(async (c, next) => {
     assertWithinLimit(
       c,
@@ -263,12 +268,22 @@ export function callRoutes(
             stream.writeSSE({ event: CALL_EVENT, data: JSON.stringify(event) }).catch(() => {});
           });
           // The phone beside the computer hears on the same stream what the computer shows.
-          const leaveCompanion = companion.connect(userId, peer.data, (event) => {
-            if (!open()) return;
-            stream
-              .writeSSE({ event: COMPANION_EVENT, data: JSON.stringify(event) })
-              .catch(() => {});
-          });
+          const leaveCompanion = companion.connect(
+            userId,
+            peer.data,
+            (event) => {
+              if (!open()) return;
+              stream
+                .writeSSE({ event: COMPANION_EVENT, data: JSON.stringify(event) })
+                .catch(() => {});
+            },
+            (command) => {
+              if (!open()) return;
+              stream
+                .writeSSE({ event: COMPANION_COMMAND_SSE_EVENT, data: JSON.stringify(command) })
+                .catch(() => {});
+            },
+          );
           stream.onAbort(() => {
             leave();
             leaveCompanion();
@@ -295,6 +310,21 @@ export function callRoutes(
       /** What this tab is (phone or desk), whether it is in front, and what its page is about. */
       .post('/calls/companion', viewer, async (c) => {
         companion.report(me(c).id, await readJson(c, companionReportSchema));
+        return c.body(null, 204);
+      })
+      /**
+       * The phone asks the computer it shows to step a slide show on or open a page – handed to
+       * that one tab of the same person. 404: no computer of theirs is there.
+       */
+      .post('/calls/companion/command', viewer, async (c) => {
+        const userId = me(c).id;
+        assertWithinLimit(
+          c,
+          commandWindow.hit(userId),
+          'Zu viele Schritte vom Handy. Bitte warte einen Moment.',
+        );
+        const { command } = await readJson(c, z.object({ command: companionCommandSchema }));
+        if (!companion.command(userId, command)) throw notFound('Kein Computer verbunden.');
         return c.body(null, 204);
       })
   );

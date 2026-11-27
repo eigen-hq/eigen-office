@@ -43,6 +43,7 @@ import { voiceSystem } from '../src/services/call-voice';
 import { senderLive } from '../src/services/sender';
 import { effectiveKey } from '../src/services/integration-keys';
 import { createReadyDeck, createTestContext, signedInUser, type TestContext } from './helpers';
+import { CompanionHub } from '../src/services/companion';
 
 let ctx: TestContext;
 const open: (() => void)[] = [];
@@ -74,6 +75,8 @@ async function tab(peer: string, cookie: string) {
   const heard: CallEvent[] = [];
   // The phone beside the computer hears on the same stream (event `companion`).
   const companion: CompanionEvent[] = [];
+  // What the phone asks of this tab (event `companion-command`).
+  const commands: unknown[] = [];
   const decoder = new TextDecoder();
   let buffer = '';
   void (async () => {
@@ -88,6 +91,8 @@ async function tab(peer: string, cookie: string) {
         if (!data) continue;
         if (lines.includes('event: companion'))
           companion.push(JSON.parse(data.slice(6)) as CompanionEvent);
+        else if (lines.includes('event: companion-command'))
+          commands.push(JSON.parse(data.slice(6)));
         else heard.push(JSON.parse(data.slice(6)) as CallEvent);
       }
     }
@@ -103,7 +108,7 @@ async function tab(peer: string, cookie: string) {
       expect(companion.length).toBeGreaterThan(0);
       return companion.at(-1)!.desk;
     });
-  return { heard, last, companion, desk };
+  return { heard, last, companion, commands, desk };
 }
 
 describe('Calls – in a conversation, heard on every page', () => {
@@ -175,7 +180,7 @@ describe('Calls – in a conversation, heard on every page', () => {
     const annasPhone = await tab('anna-phone-0001', anna.cookie);
     expect(await annasPhone.desk()).toBeNull();
     const view = {
-      kind: 'mail',
+      kind: 'mail' as const,
       workspaceId: ctx.workspaceId,
       id: 'thread-1',
       sub: null,
@@ -205,6 +210,54 @@ describe('Calls – in a conversation, heard on every page', () => {
       (await report('anna-tab-0001', { device: 'desk', active: true, view: { kind: 'nope' } }))
         .status,
     ).toBe(400);
+    // A slide show there: in use though nothing is touched; the phone's steps go to that tab alone.
+    const show = {
+      deckId: 'deck-1',
+      slideId: 's2',
+      ended: false,
+      black: false,
+      startedAt: new Date().toISOString(),
+    };
+    await report('anna-tab-0001', { device: 'desk', active: false, view: { ...view, show } });
+    await vi.waitFor(() => expect(annasPhone.companion.at(-1)?.desk?.active).toBe(true));
+    const command = (body: object, cookie = anna.cookie) =>
+      send('POST', '/calls/companion/command', { command: body }, cookie);
+    const step = { type: 'show', deckId: 'deck-1', action: 'next', from: 's2' };
+    expect((await command(step)).status).toBe(204);
+    await vi.waitFor(() => expect(annas.commands).toEqual([step]));
+    expect(annasPhone.commands).toEqual([]);
+    expect((await command({ type: 'open', path: '/w/x/dateien' })).status).toBe(204);
+    // Only the app's own addresses, only steps and pages – and only to one's own computer.
+    for (const path of ['//evil.example', 'https://evil.example', '/\\evil.example'])
+      expect((await command({ type: 'open', path })).status).toBe(400);
+    expect((await command({ type: 'delete', id: 'x' })).status).toBe(400);
+    expect((await command(step, carl.cookie)).status).toBe(404);
+    expect(carls.commands).toEqual([]);
+    // A tab gone without its stream noticing says „in use“ (or presenting) no more: once it stops
+    // saying it again, the tab really worked at wins.
+    let at = 0;
+    const hub = new CompanionHub(() => at);
+    hub.connect(
+      'u',
+      'zombie',
+      () => {},
+      () => {},
+    );
+    hub.connect(
+      'u',
+      'real',
+      () => {},
+      () => {},
+    );
+    hub.report('u', { peerId: 'zombie', device: 'desk', active: true, view: { ...view, show } });
+    at = 1_000;
+    hub.report('u', { peerId: 'real', device: 'desk', active: true, view: { ...view, id: 'b' } });
+    expect(hub.deskOf('u')?.view.id).toBe('thread-1');
+    at = 100_000;
+    hub.report('u', { peerId: 'real', device: 'desk', active: true, view: { ...view, id: 'b' } });
+    expect(hub.deskOf('u')).toMatchObject({ view: { id: 'b' }, active: true });
+    at = 200_000;
+    expect(hub.deskOf('u')).toMatchObject({ view: { id: 'b' }, active: false });
 
     // Ben answers: he connects to Anna's tab; it rings no more.
     const answered = (await (
