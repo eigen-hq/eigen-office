@@ -638,12 +638,15 @@ one setting for all.
   (über Slider)“). In code „office“ otherwise means LibreOffice or an office file (`officePreviewable`,
   `office-fonts`). Left from before: `/office` still leads to `/cloud` (`router.tsx`, `OLD_START`),
   the usage feature is still `office` (rows in the database).
-  Repositories and checkout (2026-11-26, the user: „eigen-office bzw office soll das heißen“):
-  development `Root-Bert/eigen-office` (was `slider-dev`), public `Root-Bert/office` (was
-  `slider`; the desktop app's update feed – `desktop/package.json` `build.publish` – GitHub
-  redirects the old names, so installed apps keep finding releases); the checkout is
-  `~/Developer/eigen-office` (`~/Developer/slider-dev` a symlink to it for sessions started
-  before). Workflows test `github.repository` against these names – a rename changes them too.
+  Repository and checkout (2026-11-27, the user: one public repo, worked on directly): the only
+  repository is the public `eigen-hq/eigen-office` (remote `origin`), started at release 0.1.0 =
+  1.6.18's code as one commit by „Slider“ – versions count from 0.1.0 again, a 1.x desktop app
+  is deleted with its data and installed anew (`refuseOlder`). Before: development
+  `Root-Bert/eigen-office` (remote `private`, history up to 1.6.18, tags not fetched) and the
+  public copy `Root-Bert/office`, both archived; the private history never goes into `origin` –
+  never `git push --tags`/`--all`/`--mirror` to it from an old clone. The checkout stays
+  `~/Developer/eigen-office` (`~/Developer/slider-dev` a symlink to it). Workflows test
+  `github.repository` against `eigen-hq/eigen-office` – a rename changes them too.
 - „Nur Firmen-Login“ (`workspace_sso.required`, migration 0189, 2026-11-25 the user's call): while
   a workspace's company login is active, addresses at its domain sign in through it alone – the
   check is in `startSession` (every login passes it; the SSO callback passes `companyLogin`),
@@ -3379,8 +3382,8 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   dereferenced (`cp -RL`) and copied in by `scripts/after-pack.cjs`. Output
   `desktop/dist/mac-arm64/Slider.app`, unsigned, arm64 (`bun run app`/`dmg` pass
   `-c.mac.identity=null`; the config itself is set up for signing).
-- Release (ci.yml job `desktop`, only in the public `Root-Bert/office` on a `v*` tag, after its
-  `release` job): `macos-14` builds the Mac (Apple Silicon only – no Intel build),
+- Release (release.yml job `desktop`, after a release's Publish run passed, beside deploy.yml;
+  again by hand with its tag): `macos-14` builds the Mac (Apple Silicon only – no Intel build),
   `ubuntu-24.04` / `ubuntu-24.04-arm` Linux x64 / arm64 – never cross-build, `@napi-rs/canvas`
   and the staged bun are per platform. Artifact names are stable, so
   `releases/latest/download/<name>` works: `Slider-arm64.dmg`/`.zip`, `Slider-x86_64.AppImage`,
@@ -3401,12 +3404,15 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
 - Planned (the user, 2026-11-27): releases are also to build an iPhone/iPad and an Android app –
   none exists in the repo yet (no Capacitor/React Native/Expo project). The Mac stays Apple
   Silicon only, for every app (Desktop, Cloud, Writer, Sender): no Intel build is to come back.
-- Container image (2026-11-27): ci.yml job `image` pushes `ghcr.io/root-bert/office:<version>`,
-  `:<major.minor>`, `:latest` (amd64 + arm64, from the smoke caches) in the public repo on a `v*`
-  tag, after verify/image-smoke/secrets. publish.yml must grant the called CI `packages: write`
-  (a called workflow gets no more than its caller; without it the call fails to start). GHCR makes
-  the package private on its first push – set it public once by hand. `deploy/
-  docker-compose.image.yml` (Slider + Postgres, no Caddy) pulls it, for hosts doing HTTPS.
+- The release chain (2026-11-27): a published GitHub release → publish.yml („Publish“, the full
+  ci.yml on its tag) → on success, each by `workflow_run`: deploy.yml (server) and release.yml
+  (image and desktop apps). Those two run on main's workflow files with `TAG` from
+  `workflow_run.head_branch` (GITHUB_REF_NAME is main there); the release event itself reads the
+  tag's. Container image: release.yml builds each platform on its own runner (ubuntu-24.04,
+  ubuntu-24.04-arm – the tag's smoke caches are out of main's reach), pushes by digest and tags
+  `ghcr.io/eigen-hq/eigen-office:<version>`, `:<major.minor>`, `:latest`. GHCR makes the package
+  private on its first push – set it public once by hand. `deploy/docker-compose.image.yml`
+  (Slider + Postgres, no Caddy) pulls it, for hosts doing HTTPS.
 - Linux: system window frame with the menu bar hidden (Alt shows it, „Datei“ in place of the app
   menu); LibreOffice is never loaded – found at `/usr/bin/soffice`, `/usr/lib*/libreoffice`,
   `/opt/libreoffice*`, `/snap/bin/libreoffice`, else a dialog says to install it with the package
