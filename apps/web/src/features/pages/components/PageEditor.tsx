@@ -33,14 +33,16 @@ import { InkReader } from './InkReader';
 import { usePageHost } from './PageHost';
 import { PenCatcher } from './PenCatcher';
 import { SlashMenu } from './SlashMenu';
+import { WebLinkBar } from './WebLinkBar';
 import './page.css';
 
 /*
  * A page: a Markdown file in Cloud, read as Notion shows a page. Lesen is how it opens – a click
  * in it selects words, follows a link, nothing else. Bearbeiten (the owner's button) makes the
  * same page typable where it stands: nothing moves, nothing appears around it but the caret, the
- * slash menu („/“) and the format bar over selected words. Esc and ⌘↵ go back to Lesen. What is
- * typed is in the file 600 ms later (`sync.ts`); someone else's typing comes in as it is saved.
+ * slash menu („/“), the format bar over selected words and the bar over a picked web address.
+ * Esc and ⌘↵ go back to Lesen. What is typed is in the file 600 ms later (`sync.ts`); someone
+ * else's typing comes in as it is saved.
  */
 
 const THEME: EditorThemeClasses = {
@@ -263,6 +265,7 @@ function PageBody({ opened, editing, onDone, onEdit, onSync, placeholder }: Page
       {editing && <SlashMenu />}
       {editing && <DiagramPlugin />}
       {editing && <FormatBar />}
+      {editing && <WebLinkBar />}
       {editing && canAsk && (
         <PageAgent editor={editor} sync={sync} document={opened.document} frame={frame} />
       )}

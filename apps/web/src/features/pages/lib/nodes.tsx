@@ -18,6 +18,7 @@ import { DiagramEmbed } from '../components/DiagramEmbed';
 import { LiveBlock } from '../components/LiveBlock';
 import { PageLinkChip } from '../components/PageLinkChip';
 import { RawBlock } from '../components/RawBlock';
+import { WebCardView, WebChipView } from '../components/WebLink';
 
 /*
  * The page's own nodes, beside Lexical's headings, lists, quotes, code and links:
@@ -29,6 +30,10 @@ import { RawBlock } from '../components/RawBlock';
  * - `RawBlockNode` – what the page does not edit by hand (a table, HTML, a reference): shown,
  *   kept as it stands, typed as Markdown where one opens it.
  * - `CalloutNode` – a box with a tone (`> [!NOTE]`, as GitHub writes it).
+ * - `WebChipNode` – a web address in a sentence (`https://…`, `<https://…>`): its site's icon and
+ *   the page's title, as Notion mentions a page.
+ * - `WebCardNode` – a web address alone on its line (`https://…`): its card, Notion's bookmark.
+ *   `<https://…>` alone stays a chip, `[Text](https://…)` a link in the words (Lexical's).
  */
 
 // ── Links ───────────────────────────────────────────────────────────────────
@@ -105,6 +110,136 @@ export const $createPageLinkNode = (kind: PageLinkKind, target: string, name: st
   $applyNodeReplacement(new PageLinkNode(kind, target, name));
 export const $isPageLinkNode = (node: LexicalNode | null | undefined): node is PageLinkNode =>
   node instanceof PageLinkNode;
+
+// ── Web addresses ───────────────────────────────────────────────────────────
+
+type SerializedWebChip = Spread<{ url: string; pointy: boolean }, SerializedLexicalNode>;
+
+export class WebChipNode extends DecoratorNode<ReactNode> {
+  __url: string;
+  /** Written `<https://…>`: so it is written back. */
+  __pointy: boolean;
+
+  static override getType() {
+    return 'page-web-chip';
+  }
+
+  static override clone(node: WebChipNode) {
+    return new WebChipNode(node.__url, node.__pointy, node.__key);
+  }
+
+  static override importJSON(json: SerializedWebChip) {
+    return $createWebChipNode(json.url, json.pointy);
+  }
+
+  constructor(url: string, pointy = false, key?: NodeKey) {
+    super(key);
+    this.__url = url;
+    this.__pointy = pointy;
+  }
+
+  override exportJSON(): SerializedWebChip {
+    return { ...super.exportJSON(), url: this.__url, pointy: this.__pointy };
+  }
+
+  override createDOM(): HTMLElement {
+    const span = document.createElement('span');
+    span.className = 'page-web';
+    return span;
+  }
+
+  override updateDOM() {
+    return false;
+  }
+
+  override isInline() {
+    return true;
+  }
+
+  override getTextContent() {
+    return this.__url;
+  }
+
+  getUrl() {
+    return this.getLatest().__url;
+  }
+
+  /** Alone on its line it is written `<…>`: bare there it would be read back as a card. */
+  markdown() {
+    const alone = this.getParent()?.getChildrenSize() === 1;
+    return this.__pointy || alone ? `<${this.__url}>` : this.__url;
+  }
+
+  override decorate(): ReactNode {
+    return <WebChipView url={this.__url} nodeKey={this.__key} />;
+  }
+}
+
+export const $createWebChipNode = (url: string, pointy = false) =>
+  $applyNodeReplacement(new WebChipNode(url, pointy));
+export const $isWebChipNode = (node: LexicalNode | null | undefined): node is WebChipNode =>
+  node instanceof WebChipNode;
+
+type SerializedWebCard = Spread<{ url: string }, SerializedLexicalNode>;
+
+export class WebCardNode extends DecoratorNode<ReactNode> {
+  __url: string;
+
+  static override getType() {
+    return 'page-web-card';
+  }
+
+  static override clone(node: WebCardNode) {
+    return new WebCardNode(node.__url, node.__key);
+  }
+
+  static override importJSON(json: SerializedWebCard) {
+    return $createWebCardNode(json.url);
+  }
+
+  constructor(url: string, key?: NodeKey) {
+    super(key);
+    this.__url = url;
+  }
+
+  override exportJSON(): SerializedWebCard {
+    return { ...super.exportJSON(), url: this.__url };
+  }
+
+  override createDOM(): HTMLElement {
+    const div = document.createElement('div');
+    div.className = 'page-block';
+    return div;
+  }
+
+  override updateDOM() {
+    return false;
+  }
+
+  override isInline() {
+    return false;
+  }
+
+  override getTextContent() {
+    return this.__url;
+  }
+
+  getUrl() {
+    return this.getLatest().__url;
+  }
+
+  markdown() {
+    return this.__url;
+  }
+
+  override decorate(): ReactNode {
+    return <WebCardView url={this.__url} nodeKey={this.__key} />;
+  }
+}
+
+export const $createWebCardNode = (url: string) => $applyNodeReplacement(new WebCardNode(url));
+export const $isWebCardNode = (node: LexicalNode | null | undefined): node is WebCardNode =>
+  node instanceof WebCardNode;
 
 // ── Live blocks ─────────────────────────────────────────────────────────────
 

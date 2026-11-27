@@ -43,7 +43,8 @@ const HEADING = /^\s{0,3}#{1,6}(\s|$)/;
 const RULE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
 const LIST = /^(\s*)([-*+]|\d{1,9}[.)])(\s|$)/;
 const QUOTE = /^\s{0,3}>/;
-const HTML = /^\s{0,3}<(?:[a-zA-Z][\w-]*|!--|\/[a-zA-Z])/;
+// A tag's name ends at a space, `/`, `>` or the line's end (CommonMark): `<https://…>` is a link.
+const HTML = /^\s{0,3}<(?:[a-zA-Z][\w-]*(?=[\s/>]|$)|!--|\/[a-zA-Z])/;
 const REFERENCE = /^\s{0,3}\[[^\]]+\]:\s/;
 const SETEXT = /^\s{0,3}(=+|-+)\s*$/;
 const TABLE_DIVIDER = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;

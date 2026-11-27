@@ -27,7 +27,13 @@ import {
 import { recognize } from './shapes';
 import { inkLines } from './ink-read';
 import { pencilTap, penState, setPen } from './pen';
-import { $isCalloutNode, $isLiveBlockNode, $isPageLinkNode, $isRawBlockNode } from './nodes';
+import {
+  $isCalloutNode,
+  $isLiveBlockNode,
+  $isPageLinkNode,
+  $isRawBlockNode,
+  $isWebChipNode,
+} from './nodes';
 import { PAGE_NODES } from './transformers';
 import type { Line } from './units';
 
@@ -190,6 +196,39 @@ describe('page codec', () => {
           .map((node) => node.getType()),
       ),
     ).toEqual(['paragraph', 'page-diagram-embed', 'paragraph', 'page-diagram-embed']);
+    // Web addresses: in a sentence a chip (the full stop is the sentence's), alone on a line a
+    // card, `<…>` alone a chip, `[Text](…)` a link – each written back as it stood.
+    const WEB = [
+      'Siehe https://a.example/x und <https://b.example>.',
+      'https://c.example/artikel?id=1',
+      '',
+      '<https://d.example>',
+      '',
+      '[https://e.example](https://e.example)',
+      '',
+      '- Liste mit https://f.example',
+    ];
+    const web = opened(WEB);
+    expect(written(web.editor, web.codec)).toEqual(lines(WEB));
+    expect(
+      web.editor.getEditorState().read(() =>
+        $getRoot()
+          .getChildren()
+          .map((node) => {
+            const chips = (node as ElementNode)
+              .getChildren?.()
+              .filter((child) => $isWebChipNode(child))
+              .map((chip) => chip.getUrl());
+            return chips?.length ? `${node.getType()}:${chips.join(',')}` : node.getType();
+          }),
+      ),
+    ).toEqual([
+      'paragraph:https://a.example/x,https://b.example',
+      'page-web-card',
+      'paragraph:https://d.example',
+      'paragraph',
+      'list',
+    ]);
   });
 
   it('writes only what changed: the same line ids, new ones for new blocks, none for gone ones', () => {

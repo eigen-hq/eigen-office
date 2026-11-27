@@ -727,3 +727,12 @@ a.page-diagram-embed:hover {
 .page-ink-grip:hover {
   opacity: 1;
 }
+
+/* A web address alone on its line: its card, never wider than a card is. */
+.page-web-card {
+  max-width: 28rem;
+  border-radius: var(--radius-control, 12px);
+}
+.page-web-card a {
+  text-decoration: none;
+}

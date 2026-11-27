@@ -1,5 +1,5 @@
 import { CodeNode } from '@lexical/code-core';
-import { LinkNode } from '@lexical/link';
+import { $isLinkNode, LinkNode } from '@lexical/link';
 import { ListItemNode, ListNode } from '@lexical/list';
 import {
   CHECK_LIST,
@@ -14,7 +14,7 @@ import {
   HorizontalRuleNode,
 } from '@lexical/react/LexicalHorizontalRuleNode';
 import { HeadingNode, QuoteNode } from '@lexical/rich-text';
-import type { Klass, LexicalNode } from 'lexical';
+import { $createTextNode, type Klass, type LexicalNode } from 'lexical';
 import {
   $createDiagramEmbedNode,
   $createLiveBlockNode,
@@ -24,12 +24,18 @@ import {
   $isLiveBlockNode,
   $isPageLinkNode,
   $isRawBlockNode,
+  $createWebCardNode,
+  $createWebChipNode,
+  $isWebCardNode,
+  $isWebChipNode,
   CalloutNode,
   DiagramEmbedNode,
   isLiveKind,
   LiveBlockNode,
   PageLinkNode,
   RawBlockNode,
+  WebCardNode,
+  WebChipNode,
   type PageLinkKind,
 } from './nodes';
 
@@ -47,11 +53,12 @@ export const PAGE_NODES: Klass<LexicalNode>[] = [
   DiagramEmbedNode,
   RawBlockNode,
   CalloutNode,
+  WebChipNode,
+  WebCardNode,
 ];
 
 /** `[[file:id|Name]]` – as the agents write a file into their answers (`cloud/lib/named.ts`). */
-const PAGE_LINK =
-  /\[\[(file|folder|area|presentation):([0-9a-f-]{36})\|([^\]\n}]+)\]\]/;
+const PAGE_LINK = /\[\[(file|folder|area|presentation):([0-9a-f-]{36})\|([^\]\n}]+)\]\]/;
 
 export const PAGE_LINK_TRANSFORMER: TextMatchTransformer = {
   type: 'text-match',
@@ -61,9 +68,50 @@ export const PAGE_LINK_TRANSFORMER: TextMatchTransformer = {
   regExp: new RegExp(`${PAGE_LINK.source}$`),
   trigger: ']',
   replace: (textNode, match) => {
-    textNode.replace(
-      $createPageLinkNode(match[1] as PageLinkKind, match[2]!, match[3]!.trim()),
-    );
+    textNode.replace($createPageLinkNode(match[1] as PageLinkKind, match[2]!, match[3]!.trim()));
+  },
+};
+
+/** An address written out, without what ends a sentence after it (`lib/links` `loneUrl`). */
+const WEB_URL = String.raw`https?:\/\/[^\s<>]*[^\s<>.,;:!?)\]"']`;
+
+/**
+ * A web address alone on its line: its card. Typed it becomes a chip (`WEB_CHIP_TRANSFORMER`) –
+ * one may write on after it –; a card comes from ⌘V on an empty line or the bar (`WebLinkBar`).
+ */
+export const WEB_CARD_TRANSFORMER: ElementTransformer = {
+  type: 'element',
+  dependencies: [WebCardNode],
+  export: (node) => ($isWebCardNode(node) ? node.markdown() : null),
+  regExp: new RegExp(`^(${WEB_URL})$`),
+  replace: (parentNode, _children, match) => {
+    parentNode.replace($createWebCardNode(match[1]!));
+  },
+};
+
+/**
+ * A web address in a sentence (`https://…`, or `<https://…>`): its chip. Typed, it becomes one at
+ * the space after it. Never inside a link's words (`[https://…](…)` stays that link).
+ */
+export const WEB_CHIP_TRANSFORMER: TextMatchTransformer = {
+  type: 'text-match',
+  dependencies: [WebChipNode],
+  export: (node) => ($isWebChipNode(node) ? node.markdown() : null),
+  importRegExp: new RegExp(`<(https?:\\/\\/[^\\s<>]+)>|(${WEB_URL})`),
+  regExp: new RegExp(`(?:<(https?:\\/\\/[^\\s<>]+)>|(${WEB_URL})) $`),
+  trigger: ' ',
+  getEndIndex: (node, match) =>
+    $isLinkNode(node.getParent()) ? false : (match.index ?? 0) + match[0].length,
+  replace: (textNode, match) => {
+    if ($isLinkNode(textNode.getParent())) return;
+    const chip = $createWebChipNode(match[1] ?? match[2]!, !!match[1]);
+    textNode.replace(chip);
+    // Typed: the space that made it stays after it, the caret behind the space.
+    if (match[0].endsWith(' ')) {
+      const space = $createTextNode(' ');
+      chip.insertAfter(space);
+      space.select(1, 1);
+    }
   },
 };
 
@@ -137,7 +185,9 @@ export const PAGE_TRANSFORMERS: Transformer[] = [
   DIAGRAM_EMBED_TRANSFORMER,
   LIVE_TRANSFORMER,
   RULE_TRANSFORMER,
+  WEB_CARD_TRANSFORMER,
   CHECK_LIST,
   ...TRANSFORMERS,
   PAGE_LINK_TRANSFORMER,
+  WEB_CHIP_TRANSFORMER,
 ];
