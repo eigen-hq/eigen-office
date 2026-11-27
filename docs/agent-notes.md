@@ -1767,8 +1767,8 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   sent to a server or an AI for it (the user's call): an installed app's own recognition first –
   it puts `window.sliderInk = { recognize(lines, languages) → Promise<string[]> }` on the page
   (lines top down, each its strokes, each `{x, y}` points in the 1000-wide frame; the iPad app
-  `mobile/ios` reads them with Apple's Vision, see „Tablet app“; an Android app would need ML Kit
-  Digital Ink, not built) – else Chrome's Handwriting Recognition API (`createHandwritingRecognizer`,
+  `mobile/ios` reads them with Apple's Vision, see „Tablet app“; the Android app `mobile/android`
+  with Google's ML Kit Digital Ink, see „Android app“) – else Chrome's Handwriting Recognition API (`createHandwritingRecognizer`,
   a drawing per line, the page's `lang`; documented for ChromeOS and English only – Chrome 145 on
   Android has none at all, tried on the emulator; its WebView not tried). Neither: the drawing
   stays unread, its palette has no „Als Text kopieren“/„In Text umwandeln“. Lines: pen strokes
@@ -3472,7 +3472,8 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   the Mac too (`npx electron-builder --linux deb --x64`, binaries inside are the Mac's – only for
   checking the package); AppImage only on Linux.
 - Planned (the user, 2026-11-27): releases are also to build an iPhone/iPad and an Android app –
-  none exists in the repo yet (no Capacitor/React Native/Expo project). The Mac stays Apple
+  native shells around the web app, `mobile/ios` (SwiftUI) and `mobile/android` (Kotlin), not yet
+  in any release workflow (no Capacitor/React Native/Expo project). The Mac stays Apple
   Silicon only, for every app (Desktop, Cloud, Writer, Sender): no Intel build is to come back.
 - The release chain (2026-11-27): a published GitHub release → publish.yml („Publish“, the full
   ci.yml on its tag) → on success, each by `workflow_run`: deploy.yml (server) and release.yml
@@ -3607,9 +3608,55 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   Pencil's double tap) – the hosted instance only once released. „Weiteres Konto hinzufügen“ (`/login?add=1`) stays in the web
   view (no sign-out), where Google's login refuses it. Never run in the simulator: the real
   Safari sheet (`browse()`) – the first thing to try on a device.
-- Android: not built, an open question for the owner. Chrome 145 there has no handwriting
-  recognition (`createHandwritingRecognizer` absent, tried on the emulator; its WebView not
-  tried), so reading a drawing on an Android tablet needs an installed app with ML Kit – which
-  sends Google usage data (no opt-out documented). Decided so far: no ML Kit without the owner's
-  yes; until then Android reads nothing (the drawing stays a drawing, no „Als Text kopieren“ or
-  „In Text umwandeln“).
+
+## Android app (`mobile/android`)
+
+- The iPad app's twin for Android tablets: one Activity (`MainActivity.kt`) with a WebView of the
+  server's pages (`OfficeWebView.kt`), no Compose, no AppCompat. AGP 9.5 (its built-in Kotlin, no
+  kotlin plugin), Gradle 9.9 wrapper in the repo, compileSdk/targetSdk 37, minSdk 29, id
+  `dev.bertro.office`. Build with Android Studio's JDK:
+  `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew assembleDebug`
+  (`local.properties` with `sdk.dir` is not in git). `assembleRelease` builds unsigned – no
+  signing key yet.
+- Signing in (`Session.kt`) as the iPad app: a Custom Tab on `/desktop-anmelden?app=tablet`,
+  `slider-tablet://auth` back into the `singleTask` activity (verifier and state on disk – Android
+  may end the app meanwhile), the token from `/api/auth/desktop/token` as the session cookie
+  (`slider_session` on http, `__Host-slider_session` on https) through `CookieManager`, kept
+  AES-GCM encrypted with an Android Keystore key, `allowBackup=false`. `/login` (not `?add=1`) in
+  the web view signs the app out (logout called, both cookies expired). Cleartext http only to
+  localhost/127.0.0.1 (`res/xml/network.xml`).
+- Handwriting (`InkReading.kt`): ML Kit Digital Ink (`digital-ink-recognition` 19.0) reads the
+  strokes themselves – the owner's yes, 2026-11-27, knowing it downloads its model from Google
+  (~20 MB per language, once; `de` → `de-DE`, prefetched when the pages open) and sends Google
+  usage data. Strokes get made-up times (10 ms a point, 100 ms between strokes), a writing area of
+  1000 × 1.5 line heights; one recognizer per language, lines read in parallel. Offline before
+  the model is there: the promise rejects with a German message, the drawing stays unread. Hershey
+  script strokes (as for Vision): „Milch und Eier“, „Termin morgen fruch“, „Anruf bei Ama“ –
+  better than Vision on the same lines.
+- Bridge: `WebViewCompat.addWebMessageListener` (`sliderInkNative`, own origin, main frame only) and
+  `addDocumentStartJavaScript` put a frozen `window.sliderInk.recognize` on the page; answers find
+  their promise by id. Downloads: own `http(s)` through `DownloadManager` with the cookie, the name
+  read from `Content-Disposition` (`filename*` first – `URLUtil.guessFileName` misses it and says
+  `content.bin`); `blob:` links (`a[download]`, also `a.click()` on a detached link) are read in
+  the page and saved to Downloads through MediaStore under the link's `download` name. Camera,
+  microphone and file picker asked only for the own origin. Other sites open in the browser.
+- Not done: Pencil-like double tap (`sliderpenciltap`) and `pencilDraws` – Android has no such
+  gesture API; pen strokes come as `pointerType === 'pen'` (PenCatcher), not tried with a real
+  stylus. Chrome 145 on Android has no Handwriting Recognition API, so without the app Android
+  reads nothing.
+- Trying it on the emulator (arm64 image with Google Play services – ML Kit needs them; `Probe.kt`,
+  DEBUG only, intent extras of `adb shell am start -n dev.bertro.office/.MainActivity --es …`,
+  answers in `adb logcat -s OFFICE`): `signInTo <server>`, `noBrowser 1` (prints `OFFICE_SIGN_IN
+  <url>`; post its `challenge` to `/api/auth/desktop/code` on a dev-login scratch server, then
+  `adb shell am start -a android.intent.action.VIEW -d 'slider-tablet://auth?code=…&state=…'`),
+  `open <path>`, `inkProbe <file>` / `js <file>` (a file in the app's `files/`: `adb shell "cat
+  /data/local/tmp/x | run-as dev.bertro.office sh -c 'cat > files/x'"`; `js` runs 4 s after each
+  start page load – guard it to run once), `signOutProbe 1`. A scratch web server on the Mac is
+  `http://localhost:<port>` in the emulator after `adb reverse tcp:<port> tcp:<port>`. Each page
+  logs `OFFICE_PAGE` and `OFFICE_COOKIES` (names only). Chrome's first-run screen comes up before
+  the first Custom Tab („Stay signed out“). Tablet size: `adb shell wm size 1600x2560` and
+  `wm density 320` (reset after).
+- Tried on the emulator: real Custom Tab sign-in, staying signed in after a restart, sign-out,
+  `window.sliderInk` through the page, both download kinds, the adaptive icon (Cloud.icon's layers,
+  monochrome too), a page in Bearbeiten at tablet size. Not tried: a real tablet and stylus,
+  camera/microphone in a call, the file picker, an https server.
