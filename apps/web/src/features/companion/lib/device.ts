@@ -1,28 +1,38 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * A phone: a small touch screen, upright or across. A tablet or a computer works and is shown
- * to – the phone beside it shows.
+ * A phone: a small touch screen, upright or across – it shows what goes with the computer.
+ * A tablet: touch alone, bigger (no mouse or trackpad at it) – it is offered the companion, never
+ * turned into it, and never counts as the computer one works at. Anything else is that computer.
  */
 const PHONE = '(pointer: coarse) and (max-width: 767px), (pointer: coarse) and (max-height: 500px)';
+const TOUCH = '(pointer: coarse)';
+const FINE = '(any-pointer: fine)';
 
-const phoneQuery = () =>
+export type Device = 'phone' | 'tablet' | 'desk';
+
+const media = (query: string) =>
   typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    ? window.matchMedia(PHONE)
+    ? window.matchMedia(query)
     : null;
 
-export const isPhone = (): boolean => phoneQuery()?.matches ?? false;
+export function device(): Device {
+  if (media(PHONE)?.matches) return 'phone';
+  return media(TOUCH)?.matches && !media(FINE)?.matches ? 'tablet' : 'desk';
+}
 
-/** Whether this is a phone – on as it turns or the window changes. */
-export function useIsPhone(): boolean {
+/** What this is – on as it turns, the window changes or a mouse comes and goes. */
+export function useDevice(): Device {
   return useSyncExternalStore(
     (changed) => {
-      const query = phoneQuery();
-      query?.addEventListener('change', changed);
-      return () => query?.removeEventListener('change', changed);
+      const queries = [PHONE, TOUCH, FINE].map(media);
+      for (const query of queries) query?.addEventListener('change', changed);
+      return () => {
+        for (const query of queries) query?.removeEventListener('change', changed);
+      };
     },
-    isPhone,
-    () => false,
+    device,
+    () => 'desk',
   );
 }
 

@@ -7,7 +7,7 @@ import { useCompanionHeard } from '@/lib/companion';
 import { isTextTarget } from '@/lib/dom';
 import { routes } from '@/lib/routes';
 import { deskInUse, opensByItself } from '../lib/auto';
-import { useIsPhone } from '../lib/device';
+import { useDevice } from '../lib/device';
 import { useReportView } from '../lib/report';
 
 /** How often the phone looks again whether to open the companion (a touch's pause ran out). */
@@ -31,8 +31,10 @@ export const dismissCompanion = () => {
  * by itself when the computer is in use and the phone lies there untouched.
  */
 export function CompanionWatch() {
-  const phone = useIsPhone();
-  useReportView(phone);
+  const kind = useDevice();
+  // A tablet shows like a phone (never the computer one works at); only a phone opens by itself.
+  useReportView(kind !== 'desk');
+  const phone = kind === 'phone';
   const { desk } = useCompanionHeard();
   const mode = useMe().data?.user?.companion ?? DEFAULT_COMPANION_MODE;
   const navigate = useNavigate();

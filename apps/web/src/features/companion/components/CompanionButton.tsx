@@ -6,7 +6,7 @@ import { useCompanionHeard } from '@/lib/companion';
 import { routes } from '@/lib/routes';
 import { IconButton } from '@/ui';
 import { offered } from '../lib/auto';
-import { useIsPhone } from '../lib/device';
+import { useDevice } from '../lib/device';
 
 /** The minute ticking on: a computer left an hour ago is offered no more. */
 function useMinute() {
@@ -24,7 +24,8 @@ function useMinute() {
  * with the computer's page. No pop-up, nothing asked: it stands there, or not.
  */
 export function CompanionButton() {
-  const phone = useIsPhone();
+  // A phone or a tablet: offered (a tablet never turns into it by itself).
+  const phone = useDevice() !== 'desk';
   const mode = useMe().data?.user?.companion ?? DEFAULT_COMPANION_MODE;
   const { desk } = useCompanionHeard();
   const navigate = useNavigate();
