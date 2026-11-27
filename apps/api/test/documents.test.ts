@@ -584,37 +584,6 @@ describe('Writer – text documents', () => {
     expect(JSON.stringify(ai.requests.at(-1))).not.toContain('11 22 33 44');
     // What the handwriting says (its `text` line) is read like the page's words.
     expect(JSON.stringify(ai.requests.at(-1))).toContain('text abc Milch / Eier');
-    // The handwriting read from its picture: a PNG in, its words out; anything else refused.
-    ai.steps = [[{ type: 'text', text: 'Milch\nEier' } as Anthropic.Beta.BetaContentBlock]];
-    const png = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-      'base64',
-    );
-    const read = await ctx.request(`/api/documents/${document.id}/ink-text`, {
-      method: 'POST',
-      headers: { 'content-type': 'image/png' },
-      body: png,
-    });
-    expect(read.status).toBe(200);
-    expect(await read.json()).toEqual({ text: 'Milch\nEier' });
-    expect(JSON.stringify(ai.requests.at(-1))).toContain('image/png');
-    // A tall drawing in bands, top to bottom: one turn, every band a picture.
-    ai.steps = [[{ type: 'text', text: '-' } as Anthropic.Beta.BetaContentBlock]];
-    const bands = new FormData();
-    bands.append('band', new Blob([png], { type: 'image/png' }), 'band.png');
-    bands.append('band', new Blob([png], { type: 'image/png' }), 'band.png');
-    const banded = await ctx.request(`/api/documents/${document.id}/ink-text`, {
-      method: 'POST',
-      body: bands,
-    });
-    expect(await banded.json()).toEqual({ text: '' });
-    expect(JSON.stringify(ai.requests.at(-1)).match(/image\/png/g)).toHaveLength(2);
-    const notPicture = await ctx.request(`/api/documents/${document.id}/ink-text`, {
-      method: 'POST',
-      headers: { 'content-type': 'image/png' },
-      body: 'pen text 4 1 2',
-    });
-    expect(notPicture.status).toBe(400);
     // A ```ink line inside another code block is that block's text, not a drawing.
     const fenced = [
       '```md',

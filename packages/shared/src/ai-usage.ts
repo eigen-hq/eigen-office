@@ -11,7 +11,6 @@ import { z } from 'zod';
  * What a request was for – the dashboard names them. `create`: a deck created by the AI;
  * `material`: a question about a deck's material („Fragen“ on the material page); `document`: a
  * comment in a text document handed to the AI; `mail`: a reply the AI wrote into a mail's field;
- * `handwriting`: what a drawing on a page says, read for its search.
  */
 export const AI_FEATURES = [
   'edit',
@@ -25,7 +24,6 @@ export const AI_FEATURES = [
   'office',
   'document',
   'mail',
-  'handwriting',
 ] as const;
 export const aiFeatureSchema = z.enum(AI_FEATURES);
 export type AiFeature = z.infer<typeof aiFeatureSchema>;

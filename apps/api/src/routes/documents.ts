@@ -26,7 +26,6 @@ import { aiLimits } from '../http/ai-limits';
 import { ApiError, badRequest, fileTooLarge } from '../http/errors';
 import { assertWithinLimit, fixedWindow } from '../http/rate-limit';
 import { readJson } from '../http/validate';
-import { MAX_INK_BANDS, MAX_INK_PICTURE_BYTES, readInk } from '../services/ink-text';
 import {
   listDocumentAi,
   moveDocumentAi,
@@ -185,33 +184,6 @@ export function documentsRoutes(deps: AppDeps, live = new DocumentLive()) {
           await addDocumentPicture(deps, userId, c.req.param('documentId'), type, bytes),
           201,
         );
-      })
-      // What a drawing's handwriting says – its picture in, its words out (`services/ink-text.ts`).
-      .post('/documents/:documentId/ink-text', viewer, async (c) => {
-        const userId = user(c);
-        assertWithinLimit(
-          c,
-          aiLimits(deps).inkReads.hit(userId),
-          'Zu viele KI-Aufträge auf einmal. Bitte warte einen Moment.',
-        );
-        const type = c.req.header('content-type') ?? '';
-        const bytes = await bodyBytes(c.req.raw, MAX_INK_PICTURE_BYTES);
-        // One picture, or a tall drawing's bands as `band` parts of a form, top to bottom.
-        const bands = type.startsWith('multipart/form-data')
-          ? await Promise.all(
-              (await new Response(bytes, { headers: { 'content-type': type } }).formData())
-                .getAll('band')
-                .slice(0, MAX_INK_BANDS + 1)
-                .map(async (part) =>
-                  typeof part === 'string'
-                    ? new Uint8Array()
-                    : new Uint8Array(await part.arrayBuffer()),
-                ),
-            ).catch(() => {
-              throw badRequest('Das ist kein Bild einer Zeichnung.');
-            })
-          : [bytes];
-        return c.json(await readInk(deps, userId, c.req.param('documentId'), bands));
       })
       .get('/documents/:documentId/tools', viewer, async (c) =>
         c.json<WriterTools>(await documentTools(deps, user(c), c.req.param('documentId'))),

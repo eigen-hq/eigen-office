@@ -180,20 +180,6 @@ export const sendDocumentEdit = (documentId: string, input: WriterEditInput) =>
 export const uploadDocumentPicture = (documentId: string, file: Blob) =>
   postBytes<{ path: string }>(`${documentPath(documentId)}/pictures`, file, file.type);
 
-/** What a drawing's handwriting says, read by the AI from its pictures (PNG bands, top down). */
-export async function readDocumentInk(documentId: string, bands: readonly Blob[]) {
-  const path = `${documentPath(documentId)}/ink-text`;
-  if (bands.length === 1) return postBytes<{ text: string }>(path, bands[0]!, 'image/png');
-  const form = new FormData();
-  for (const band of bands) form.append('band', band, 'band.png');
-  const body = new Response(form);
-  return postBytes<{ text: string }>(
-    path,
-    await body.blob(),
-    body.headers.get('content-type') ?? 'multipart/form-data',
-  );
-}
-
 /** Photos of the workspace's photo service for a search, as for a slide; empty: at random. */
 export const useDocumentPhotos = (documentId: string, query: string) =>
   useQuery({
