@@ -42,8 +42,19 @@
     /// `OFFICE_SIGN_OUT_PROBE`: after the handwriting, the page goes to its login.
     static let signOutProbe = env["OFFICE_SIGN_OUT_PROBE"] != nil
 
+    /// `OFFICE_OPEN=<path>`: from the start page on to this one (a page of the office).
+    static let openPath = env["OFFICE_OPEN"]
+
     @MainActor static func pageLoaded(_ view: WKWebView) {
       print("OFFICE_PAGE \(view.url?.absoluteString ?? "")")
+      if let path = openPath, view.url?.path == "/" {
+        view.evaluateJavaScript("location.assign(\(String(reflecting: path)))")
+      }
+      // `OFFICE_FOCUS_PROBE`: a field of the page focused, then left (Scribble there, not drawing).
+      if env["OFFICE_FOCUS_PROBE"] != nil, view.url?.path != "/" {
+        view.evaluateJavaScript(
+          "setTimeout(() => { const f = document.querySelector('textarea, input:not([type=hidden])'); f?.focus(); console.log(!!f); setTimeout(() => f?.blur(), 1500) }, 3000)")
+      }
       view.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
         print("OFFICE_COOKIES \(cookies.map { "\($0.name) httpOnly=\($0.isHTTPOnly)" })")
       }
@@ -59,6 +70,18 @@
           if signOutProbe { view.evaluateJavaScript("location.assign('/login')") }
         case .failure(let error): print("OFFICE_INK_ERROR \(error)")
         }
+      }
+    }
+
+    /// `OFFICE_PENCIL_PROBE`: the Pencil's double tap (eraser) once the page loads – the page
+    /// tells whether it heard it (`OFFICE_PENCIL_TAP`).
+    @MainActor static func pencilProbe(_ view: WKWebView, tap: @escaping () -> Void) {
+      guard env["OFFICE_PENCIL_PROBE"] != nil else { return }
+      view.evaluateJavaScript(
+        "window.addEventListener('sliderpenciltap', (e) => window.webkit.messageHandlers.sliderInk.postMessage({ pencilDraws: e.detail.action === 'eraser' }), { once: true })"
+      ) { _, _ in
+        print("OFFICE_PENCIL_TAP sent")
+        tap()
       }
     }
   }
