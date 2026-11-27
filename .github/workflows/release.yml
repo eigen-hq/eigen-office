@@ -75,8 +75,10 @@ jobs:
             org.opencontainers.image.source=https://github.com/eigen-hq/eigen-office
             org.opencontainers.image.version=${{ env.TAG }}
           outputs: type=image,name=ghcr.io/eigen-hq/eigen-office,push-by-digest=true,name-canonical=true,push=true
+          # A run started by workflow_run may not write the cache („token has no writable scopes“,
+          # v0.1.0): the image is pushed anyway, the next one builds without it.
           cache-from: type=gha,scope=release-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }},ignore-error=true
       - name: Keep the digest
         run: |
           mkdir -p "$RUNNER_TEMP/digests"
