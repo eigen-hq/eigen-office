@@ -1,4 +1,4 @@
-# Slider – rules for coding agents
+# Eigen Office – rules for coding agents
 
 Claude Code reads `CLAUDE.md`, Codex `AGENTS.md` (symlink). Before touching an area listed in
 [`docs/do-not-break.md`](docs/do-not-break.md), run its check and report it. Gotchas (LibreOffice,

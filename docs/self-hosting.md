@@ -1,8 +1,11 @@
-# Slider selbst hosten
+# Eigen Office selbst hosten
 
-Slider läuft als ein Container (API und Web-App) mit Postgres und Caddy davor, der HTTPS per
+Eigen Office läuft als ein Container (API und Web-App) mit Postgres und Caddy davor, der HTTPS per
 Let's Encrypt übernimmt. Das Image wird aus dem Repo gebaut – oder, wo ein Host HTTPS selbst
 macht, fertig gezogen (siehe [Fertiges Image](#fertiges-image-ohne-caddy)).
+
+Technische Namen tragen noch den früheren Namen Slider – der Dienst `slider`, die Variablen
+`SLIDER_*`, der Pfad `/opt/slider` – und bleiben so; Slider heißt heute die Präsentations-App.
 
 ## Voraussetzungen
 
@@ -34,7 +37,7 @@ Eine feste Version statt des neuesten Stands: vor dem Bauen `git checkout <tag>`
 Jedes Release liegt als Image unter `ghcr.io/eigen-hq/eigen-office` (amd64 und arm64; Tags `0.1.0`,
 `0.1`, `latest`). Für Hosts, die HTTPS und den Proxy selbst stellen – eine App-Plattform, die eine
 Compose-Datei nimmt, Coolify, Portainer, ein eigener Reverse-Proxy – gibt es
-`deploy/docker-compose.image.yml`: nur Slider und Postgres, nichts wird gebaut.
+`deploy/docker-compose.image.yml`: nur Eigen Office und Postgres, nichts wird gebaut.
 
 ```bash
 cd deploy
@@ -57,8 +60,8 @@ docker compose -f docker-compose.image.yml logs slider   # Einrichtungsseite und
 1. Im Log stehen die **Einrichtungsseite** `https://slider.firma.de/einrichtung` und ein
    einmaliger **Setup-Token** (Zeile `Setup token: …`). Nicht weitergeben.
 2. Seite öffnen, Token eingeben, mindestens einen Anmeldeweg eintragen (siehe
-   [Anmeldung](#anmeldung)) und **Speichern**. Slider startet kurz neu.
-3. Anmelden. Slider fragt danach sofort: den Setup-Token **noch einmal** eingeben →
+   [Anmeldung](#anmeldung)) und **Speichern**. Eigen Office startet kurz neu.
+3. Anmelden. Eigen Office fragt danach sofort: den Setup-Token **noch einmal** eingeben →
    **Admin werden**. Anmelden allein macht niemanden zum Admin.
 
 Solange es keinen Admin gibt, kommt jedes neue Konto nur bis zur Abfrage des Tokens. Danach
@@ -81,7 +84,7 @@ Kontotypen „beliebiges Organisationsverzeichnis und persönliche Microsoft-Kon
 Plattform _Web_ mit Redirect-URI `https://slider.firma.de/api/auth/microsoft/callback`. Neuen
 Clientschlüssel anlegen. API-Berechtigungen (delegiert), Microsoft Graph: `openid`, `profile`,
 `email`. Unter Tokenkonfiguration → Optionalen Anspruch hinzufügen → ID: `xms_edov` – dann
-nimmt Slider eine Adresse nur, wenn Microsoft sie bestätigt hat. Nur die eigene Firma:
+nimmt Eigen Office eine Adresse nur, wenn Microsoft sie bestätigt hat. Nur die eigene Firma:
 `MS_TENANT=<Tenant-ID>`.
 
 **Google:** [Google Cloud Console](https://console.cloud.google.com/) → neues Projekt →
@@ -106,7 +109,7 @@ Firmen-Login (SSO) in ihren Einstellungen verbinden.
 
 Die Desktop-App (Mac, Linux; Download unter den GitHub-Releases) meldet sich standardmäßig bei
 office.bertro.dev an. Für die eigene Instanz: in der App unter Konto → **Anderer Server** die
-Adresse eintragen, z. B. `https://slider.firma.de` (https, ab Slider 1.6.0). Die Anmeldung öffnet
+Adresse eintragen, z. B. `https://slider.firma.de` (https). Die Anmeldung öffnet
 den Browser mit den Logins der Instanz; danach liegen die Workspaces und Präsentationen des Kontos
 als Kopien auf dem Computer und werden abgeglichen. Auf dem Server ist nichts einzurichten.
 
@@ -149,20 +152,20 @@ Dienst.
 
 ## KI-Apps
 
-Claude, ChatGPT und Claude Code verbinden sich über MCP mit Slider: Adresse
+Claude, ChatGPT und Claude Code verbinden sich über MCP mit Eigen Office: Adresse
 `https://slider.firma.de/api/mcp`, Anmeldung per OAuth oder mit einem Token aus Konto →
 **KI-Apps**. Auf dem Server ist nichts einzurichten, die Adressen kommen aus `SLIDER_URL`. Die
 OAuth-Erkennung liegt im Wurzelverzeichnis der Domain (`/.well-known/oauth-…`): Der mitgelieferte
 Caddy leitet alles durch, ein eigener Proxy, der nur einzelne Pfade weiterreicht, braucht
-`/.well-known/` dazu. Claude und ChatGPT rufen Slider aus ihrer Cloud auf; eine Instanz nur im Firmennetz erreicht
+`/.well-known/` dazu. Claude und ChatGPT rufen Eigen Office aus ihrer Cloud auf; eine Instanz nur im Firmennetz erreicht
 nur Claude Code auf Rechnern in diesem Netz.
 
 ## E-Mail (optional)
 
-Für Einladungen, Login-Links, Datenanfragen und Löschhinweise. Ohne SMTP zeigt Slider
+Für Einladungen, Login-Links, Datenanfragen und Löschhinweise. Ohne SMTP zeigt Eigen Office
 Einladungslinks zum Weitergeben an. Jeder SMTP-Zugang geht, z. B. Brevo:
 `SMTP_URL=smtp://<login>:<smtp-key>@smtp-relay.brevo.com:587` und
-`MAIL_FROM=Slider <slider@firma.de>`. Sonderzeichen im Login URL-kodieren (`@` → `%40`).
+`MAIL_FROM=Eigen Office <office@firma.de>`. Sonderzeichen im Login URL-kodieren (`@` → `%40`).
 Absender-Domain beim Dienst verifizieren (SPF/DKIM). Viele Cloud-Hoster sperren ausgehend Port 25
 und 465, dann 587 nehmen.
 
@@ -172,7 +175,7 @@ Fotos im Editor und für die KI kommen von Unsplash. Auf
 [unsplash.com/oauth/applications](https://unsplash.com/oauth/applications) eine App anlegen und
 ihren Access Key als `UNSPLASH_ACCESS_KEY` setzen (Secret Key unnötig). Neue Apps sind im
 Demo-Modus (50 Anfragen pro Stunde); für mehr „Production“ beantragen, mit Screenshots der
-Fotonennung im Editor und im Kommentar der KI. Slider hält die Unsplash-Regeln ein (Key nur auf
+Fotonennung im Editor und im Kommentar der KI. Eigen Office hält die Unsplash-Regeln ein (Key nur auf
 dem Server, Hotlinks, verlinkte Nennung, einmalige Meldung pro Foto). Die Datenschutz-Vorlage
 nimmt den Absatz „Fotosuche“ auf, sobald der Key gesetzt ist.
 
@@ -249,7 +252,7 @@ wird aufgezeichnet, kein Dritter ist beteiligt.
 3. **`deploy/.env`:** `COMPOSE_PROFILES=call` (mit anderen Profilen per Komma, z. B.
    `COMPOSE_PROFILES=stt,call`) und `CALL_DOMAIN=call.firma.de`, dann `docker compose up -d`.
 
-Beim ersten Start legt Slider das Schlüsselpaar für LiveKit im Daten-Volume an
+Beim ersten Start legt Eigen Office das Schlüsselpaar für LiveKit im Daten-Volume an
 (`/data/livekit/keys.yaml`), LiveKit liest es von dort – nichts von Hand. Caddy holt das
 Zertifikat für `CALL_DOMAIN`; LiveKit nutzt es für TURN über TLS und startet neu, sobald es da
 ist (bis dahin läuft TURN nur über UDP). Ein erneuertes nimmt es nachts zwischen 2 und 4 Uhr
@@ -268,8 +271,8 @@ nicht läuft. Mit dem gemeinsamen Caddy aus `deploy/proxy/` steht die Site in
 
 ## Schlüssel sichern
 
-Slider verschlüsselt Inhalte (Dateien, Kommentare, Folientexte) mit `SLIDER_DATA_KEY`. Ohne ihn
-erzeugt Slider ihn beim ersten Start in `/data/data-key`. Dann liegt er aber im selben Volume
+Eigen Office verschlüsselt Inhalte (Dateien, Kommentare, Folientexte) mit `SLIDER_DATA_KEY`. Ohne ihn
+erzeugt Eigen Office ihn beim ersten Start in `/data/data-key`. Dann liegt er aber im selben Volume
 wie die Daten und schützt die Backups nicht. Deshalb nach dem ersten Start auslagern:
 
 ```bash
@@ -280,7 +283,7 @@ docker compose exec slider rm /data/data-key
 ```
 
 Den Schlüssel zusätzlich im Passwortmanager ablegen und **nie ändern**: Mit einem anderen startet
-Slider nicht, ohne ihn sind alle Inhalte verloren, auch in jedem Backup.
+Eigen Office nicht, ohne ihn sind alle Inhalte verloren, auch in jedem Backup.
 
 ## Backups
 
@@ -326,7 +329,7 @@ docker builder prune -f --filter until=24h   # Build-Cache, wächst sonst mit je
 Vorher ein Backup ziehen: Migrationen lassen sich nicht zurückdrehen.
 
 Von einer Version vor 1.6: OneDrive, SharePoint und Google Drive gibt es nicht mehr, Microsoft und
-Google dienen nur noch der Anmeldung. Beim ersten Start widerruft Slider gespeicherte
+Google dienen nur noch der Anmeldung. Beim ersten Start widerruft Eigen Office gespeicherte
 Google-Zugriffe (braucht ausgehend `oauth2.googleapis.com`, sonst beim nächsten Start) und löscht
 die alten Dateiverbindungen. Danach in der Entra-App alles außer `openid`, `profile` und `email`
 entfernen und bei Google den Bereich `drive.file` sowie Drive-, Picker- und Slides-API abschalten.
@@ -384,8 +387,8 @@ neuen Adresse neu verbinden. Kommt niemand mehr über die alte, `SLIDER_OLD_DOMA
     -v slider-data:/data -e SLIDER_URL=https://slider.firma.de -e TRUST_PROXY=1 slider:local
   ```
 
-  Ohne `DATABASE_URL` nutzt Slider die eingebettete Datenbank in `/data/db`. Der Proxy sollte
-  HTTP/2 sprechen. Große Dateien (ab 64 MB) lädt Slider in Teilen zu 32 MB hoch, kleinere in
+  Ohne `DATABASE_URL` nutzt Eigen Office die eingebettete Datenbank in `/data/db`. Der Proxy sollte
+  HTTP/2 sprechen. Große Dateien (ab 64 MB) lädt Eigen Office in Teilen zu 32 MB hoch, kleinere in
   einer Anfrage (ein Kommentar mit zehn Bildern bis gut 100 MB): nginx braucht deshalb
   `client_max_body_size 128m;` (Caddy hat kein Limit).
 
@@ -393,7 +396,7 @@ neuen Adresse neu verbinden. Kommt niemand mehr über die alte, `SLIDER_OLD_DOMA
 - **Cloudflare:** DNS-Record erst „Nur DNS“, bis Caddy das Zertifikat hat, dann Proxy an und
   SSL-Modus „Vollständig (streng)“. In `deploy/.env` die Zeile `TRUSTED_PROXIES=…`
   einkommentieren, sonst teilen sich alle Besucher ein Rate-Limit. Der Free-Plan nimmt höchstens
-  100 MB pro Anfrage an; Präsentationen und Aufnahmen lädt Slider ab 64 MB in Teilen zu 32 MB
+  100 MB pro Anfrage an; Präsentationen und Aufnahmen lädt Eigen Office ab 64 MB in Teilen zu 32 MB
   hoch (tus), der Proxy (orange Wolke) kann also an bleiben. Ein abgebrochener Upload geht beim
   nächsten Versuch mit derselben Datei weiter, auch nach einem Neuladen der Seite.
 - **Mehrere Apps auf einem Server:** Ein gemeinsamer Caddy aus `deploy/proxy/` übernimmt 80/443
@@ -411,7 +414,7 @@ gehen auch auf der Einrichtungsseite.
 
 | Variable                                                          | Pflicht           | Bedeutung                                                                                                         |
 | ----------------------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `SLIDER_DOMAIN`                                                   | ja (Compose)      | Öffentlicher Hostname; Slider läuft unter `https://<domain>`.                                                     |
+| `SLIDER_DOMAIN`                                                   | ja (Compose)      | Öffentlicher Hostname; Eigen Office läuft unter `https://<domain>`.                                                     |
 | `POSTGRES_PASSWORD`                                               | ja (Compose)      | Nur Hex (`openssl rand -hex 24`).                                                                                 |
 | `SLIDER_URL`                                                      | ja (ohne Compose) | Öffentliche URL, z. B. `https://slider.firma.de` (früher `WEB_ORIGIN`).                                           |
 | `SLIDER_SECRET`                                                   | nein              | Signiert Sessions, verschlüsselt Tokens und Einstellungen. Leer: in `DATA_DIR/secret` erzeugt.                    |
