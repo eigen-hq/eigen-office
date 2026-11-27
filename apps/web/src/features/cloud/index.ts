@@ -10,7 +10,7 @@ export {
   useOpenApp,
   type AppEntry,
 } from './components/AppSwitcher';
-export { CloudChatButton, WorkspaceChat } from './components/CloudChat';
+export { CloudChatButton, CompanionChat, WorkspaceChat } from './components/CloudChat';
 export { DateButton } from './components/calendar/DateButton';
 export { MeetingNotice } from './components/calendar/MeetingNotice';
 export { CalendarPreferences } from './components/calendar/CalendarPreferences';

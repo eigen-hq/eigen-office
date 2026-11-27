@@ -1,5 +1,6 @@
 import { createBrowserRouter, Outlet } from 'react-router';
 import { CommandKey } from '@/features/commands';
+import { CompanionWatch } from '@/features/companion';
 import { PeoplePicturesSync } from './PeoplePicturesSync';
 import { RouteError } from './RouteError';
 
@@ -13,12 +14,14 @@ import { RouteError } from './RouteError';
  */
 export const router = createBrowserRouter([
   {
-    // Every page: the command panel (⌘K) and people's pictures for whoever is signed in.
+    // Every page: the command panel (⌘K), people's pictures for whoever is signed in, and the
+    // phone beside the computer (what the computer shows, the phone turning into its companion).
     element: (
       <>
         <Outlet />
         <CommandKey />
         <PeoplePicturesSync />
+        <CompanionWatch />
       </>
     ),
     errorElement: <RouteError />,
@@ -59,6 +62,8 @@ export const router = createBrowserRouter([
           // An AI app asks to be let in (OAuth, „KI-Apps“).
           { path: 'verbinden', lazy: () => import('@/features/account/ConnectAppPage') },
           { path: 'einstellungen', lazy: () => import('@/features/account/PreferencesPage') },
+          // The phone beside the computer: what goes with the computer's page, and the AI.
+          { path: 'begleiter', lazy: () => import('@/features/companion/CompanionPage') },
           { path: 'nutzung', lazy: () => import('@/features/account/UsagePage') },
           // Slider's presentations; the installed Slider starts here (`manifest.webmanifest`).
           { path: 'slider', lazy: () => import('@/features/reviews/SliderStart') },

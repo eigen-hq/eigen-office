@@ -1,4 +1,4 @@
-import type { CallVoices, MeResponse, UpdateMeInput } from '@slider/shared';
+import type { CallVoices, CompanionMode, MeResponse, UpdateMeInput } from '@slider/shared';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api, apiFile, isStoredAnswer, pageIsFor } from '../api-client';
 import { sawVersion } from '../app-version';
@@ -92,6 +92,27 @@ export function useSetMeetingNotice() {
       return { before };
     },
     onError: (_error, _minutes, context) => {
+      if (context?.before !== undefined) put(context.before);
+    },
+  });
+}
+
+/** Einstellungen › Darstellung › „Handy als Begleiter“: by itself, offered, or never. */
+export function useSetCompanion() {
+  const queryClient = useQueryClient();
+  const put = (mode: CompanionMode) =>
+    queryClient.setQueryData<MeResponse>(queryKeys.me, (me) =>
+      me?.user ? { ...me, user: { ...me.user, companion: mode } } : me,
+    );
+  return useMutation({
+    scope: { id: 'me' },
+    mutationFn: (mode: CompanionMode) => api.patch<MeResponse>('/me', { companion: mode }),
+    onMutate: (mode) => {
+      const before = queryClient.getQueryData<MeResponse>(queryKeys.me)?.user?.companion;
+      put(mode);
+      return { before };
+    },
+    onError: (_error, _mode, context) => {
       if (context?.before !== undefined) put(context.before);
     },
   });

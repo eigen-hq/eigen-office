@@ -112,6 +112,9 @@ export const iconPaths = {
   darkMode:
     'M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z',
   delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9zm7.5-5l-1-1h-5l-1 1H5v2h14V4z',
+  /** Material Icons „devices“: a screen and a phone beside it – the phone as companion. */
+  devices:
+    'M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z',
   /** Material Icons „desktop_windows“: follow the system's theme. */
   /** Material Symbols „desk“: an agent's desk („Schreibtisch“). */
   desk: 'M2 18V6h20v12h-2v-2h-4v2h-2V8H4v10H2Zm14-8h4V8h-4v2Zm0 4h4v-2h-4v2Z',

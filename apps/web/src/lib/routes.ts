@@ -53,6 +53,8 @@ export const routes = {
   account: () => '/konto',
   /** "Einstellungen": your colour and how decks open – kept apart from the account. */
   preferences: () => '/einstellungen',
+  /** The phone beside the computer: what goes with the computer's page (`features/companion`). */
+  companion: () => '/begleiter',
   /** "Nutzung": plan, limits, storage and billing of a workspace (BER-151..155). */
   usage: (workspaceId?: string | null) =>
     workspaceId ? `/nutzung?workspace=${encodeURIComponent(workspaceId)}` : '/nutzung',

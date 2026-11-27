@@ -12,6 +12,7 @@ import {
   ReaderLogo,
   WriterLogo,
 } from '@/features/cloud';
+import { CompanionButton } from '@/features/companion';
 import { HomeChatButton } from '@/features/reviews';
 import { NotifyOffer } from '@/features/sender';
 import {
@@ -189,6 +190,8 @@ export function AppHeader({
         <NotifyOffer />
         {/* Today, and from it the calendar – where one's to-dos are (Cloud, Sender). */}
         {/* A meeting coming up, left of the date: joined from here. */}
+        {/* The phone beside the computer: offered here, on a phone, every app. */}
+        <CompanionButton />
         {(inCloud || inSender) && workspace && <MeetingNotice workspaceId={workspace.id} />}
         {(inCloud || inSender) && workspace && <DateButton workspaceId={workspace.id} />}
         {(inCloud || inSender) && <CloudChatButton name={workspace?.aiName} />}

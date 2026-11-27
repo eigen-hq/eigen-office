@@ -69,10 +69,23 @@ if (typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined') {
   window.addEventListener('pagehide', () => tell({ gone: true }));
 }
 
+/** Who wants to know when this window's lines change (the phone beside the computer). */
+const changes = new Set<() => void>();
+
 export function setCallHere(key: string, lines: string | null): void {
   if (lines) parts.set(key, lines);
   else parts.delete(key);
   toldFocus();
+  for (const changed of changes) changed();
+}
+
+/** This window's own lines – what its page says it shows, whatever window has the focus. */
+export const ownCallHere = (): string => own();
+
+/** Hears every change of this window's lines; returns the undo. */
+export function onCallHere(changed: () => void): () => void {
+  changes.add(changed);
+  return () => changes.delete(changed);
 }
 
 /** What the person has in front of them: this window's lines – or, focused since, another's. */

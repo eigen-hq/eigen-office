@@ -1,5 +1,5 @@
 import { aiInSentence, aiNameOf, CLOUD_TRASH_DAYS } from '@slider/shared';
-import { useEffect, useState, type ComponentProps } from 'react';
+import { useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { useCallInBackground, usePanelForCalls } from '@/features/calls';
 import { ChatPanel } from '@/features/viewer';
 import { AiButton } from '@/ui';
@@ -38,6 +38,13 @@ const WORKSPACE_STARTERS = [
   'Hilf mir, eine Datei zu finden',
   'Räum „Meine Dateien“ auf',
   'Erstell eine Präsentation aus meinen Dateien',
+];
+
+/** On the phone beside the computer: about what the computer shows. */
+const COMPANION_STARTERS = [
+  'Fass zusammen, was ich am Computer offen habe',
+  'Was sollte ich hier als Nächstes tun?',
+  'Finde passende Dateien dazu',
 ];
 
 /** ✨ in the app's header, in Cloud. */
@@ -112,6 +119,41 @@ export function WorkspaceChat({
       ask={ask}
       onAsked={asked}
       onClose={close}
+    />
+  );
+}
+
+/**
+ * The same chat on the phone beside the computer (`features/companion`): about what the
+ * computer shows (`here`), opened by the companion's own field – which sends `ask` at once.
+ */
+export function CompanionChat({
+  workspace,
+  here,
+  ask,
+  onAsked,
+  notify,
+  onClose,
+}: {
+  workspace: { id: string; aiName?: string | undefined };
+  here: string;
+  ask: string | null;
+  onAsked: () => void;
+  notify: Notify;
+  onClose: () => void;
+}) {
+  usePanelForCalls();
+  // One object per question: the panel sends each `ask` it is given once.
+  const asked = useMemo(() => (ask ? { text: ask } : null), [ask]);
+  return (
+    <Panel
+      workspace={workspace}
+      place={{ folderId: null, areaId: null, here }}
+      starters={COMPANION_STARTERS}
+      notify={notify}
+      ask={asked}
+      onAsked={onAsked}
+      onClose={onClose}
     />
   );
 }

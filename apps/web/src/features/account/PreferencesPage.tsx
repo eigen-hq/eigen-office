@@ -1,6 +1,7 @@
 import { SettingsLayout } from '@/shell/layouts/SettingsLayout';
 import { useAccount } from '@/features/auth';
 import { CalendarPreferences, canPlaceApps, FilesPreferences } from '@/features/cloud';
+import { CompanionPreferences } from '@/features/companion';
 import { MailPreferences, NotifyPreferences } from '@/features/sender';
 import { loadedVersion, useNewerVersion } from '@/lib/app-version';
 import { Button, Icon, Section, useToast, type IconName } from '@/ui';
@@ -15,6 +16,7 @@ import {
 /** The page's sections, in order, for the nav at the side. */
 const NAV = [
   { id: 'darstellung', title: 'Darstellung', icon: 'palette' },
+  { id: 'begleiter', title: 'Handy als Begleiter', icon: 'devices' },
   { id: 'anrufe', title: 'Anrufe', icon: 'call' },
   { id: 'benachrichtigungen', title: 'Benachrichtigungen', icon: 'notifications' },
   // Cloud's app only: where each app's pages open.
@@ -57,6 +59,7 @@ export function Component() {
           <ViewDefaultChoice />
         </div>
       </Section>
+      <CompanionPreferences onNotify={showToast} />
       <CallVoiceSection onNotify={showToast} />
       <NotifyPreferences />
       <AppsSection />

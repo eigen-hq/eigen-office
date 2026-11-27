@@ -6,12 +6,15 @@ import {
   type CallJoined,
   type CallSignal,
   type CallState,
+  type CompanionEvent,
   type VoiceLive,
+  COMPANION_SSE_EVENT,
   MAX_CALL_UTTERANCE,
 } from '@slider/shared';
 import { api, ApiError, apiRequest } from '@/lib/api-client';
 import { Levels } from './levels';
 import { callHere } from '@/lib/call-here';
+import { companionStreamOpened, hearCompanion } from '@/lib/companion';
 import type { CallListener } from './listener';
 import { camera, MediaRefused, microphone, screen } from './media';
 import { Mesh, type RemoteMedia, type Slot, type Transport } from './mesh';
@@ -147,6 +150,15 @@ export class CallClient {
         console.error('Calls: an event could not be handled', error);
       }
     });
+    // The phone beside the computer hears on this stream what the computer shows.
+    stream.addEventListener(COMPANION_SSE_EVENT, (message) => {
+      try {
+        hearCompanion(JSON.parse((message as MessageEvent<string>).data) as CompanionEvent);
+      } catch (error) {
+        console.error('Companion: an event could not be handled', error);
+      }
+    });
+    stream.addEventListener('open', () => companionStreamOpened());
     stream.addEventListener('error', () => {
       if (stream.readyState !== EventSource.CLOSED || this.source !== stream) return;
       this.timer = window.setTimeout(() => this.openStream(), RECONNECT_MS);
