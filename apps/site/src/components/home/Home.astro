@@ -1,0 +1,19 @@
+---
+import Product from '../product/Product.astro';
+import Questions from './Questions.astro';
+import type { Lang } from '~/i18n';
+
+/**
+ * Slider's page, the same in every language: the page every app has (`product/Product.astro`),
+ * with the questions everyone asks as a row of slides before its screens.
+ */
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+---
+
+<Product app="slider" lang={lang}>
+  <Questions lang={lang} />
+</Product>

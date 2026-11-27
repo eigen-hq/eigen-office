@@ -1,0 +1,40 @@
+import { wheelFactor } from '@/lib/wheel';
+import { slideHeightAt, splitForHeight, type TrackGeometry } from './timeline-layout';
+
+export { SPLIT_MAX, SPLIT_MIN } from '@/lib/preferences/split';
+
+/**
+ * The split handle between the slide area and the comment area. The split is `t` ∈ [0, 1]
+ * between the smallest and the largest slide height (see `timeline-layout`), or `null` for the
+ * default (Desktop-1 proportions). Storing `t` rather than pixels keeps the setting meaningful
+ * across window sizes and decks.
+ */
+/** ↑ / ↓ on the focused handle move it this far; with Shift four times as far. */
+export const SPLIT_KEY_STEP_PX = 24;
+export const SPLIT_KEY_STEP_LARGE_PX = 96;
+
+/** Dragging the handle by `dy` pixels (down = positive) from where the slides were `startH` tall. */
+export const dragSplit = (startH: number, dy: number, geo: TrackGeometry) =>
+  splitForHeight(startH + dy, geo);
+
+/** One keyboard step up (-1, smaller slides) or down (+1, bigger slides). */
+export const stepSplit = (
+  split: number | null,
+  direction: 1 | -1,
+  geo: TrackGeometry,
+  stepPx = SPLIT_KEY_STEP_PX,
+) => splitForHeight(slideHeightAt(split, geo) + direction * stepPx, geo);
+
+export { wheelFactor };
+
+/** Ctrl/⌘ + wheel and trackpad pinch: scrolling down (positive delta) makes the slides smaller. */
+export const wheelSplit = (
+  split: number | null,
+  deltaY: number,
+  deltaMode: number,
+  geo: TrackGeometry,
+): number => splitForHeight(slideHeightAt(split, geo) * wheelFactor(deltaY, deltaMode), geo);
+
+/** Safari pinch: `scale` is relative to the slide height when the gesture started. */
+export const pinchSplit = (startSplit: number | null, scale: number, geo: TrackGeometry) =>
+  splitForHeight(slideHeightAt(startSplit, geo) * scale, geo);

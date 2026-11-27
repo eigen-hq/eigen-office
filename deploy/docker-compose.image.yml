@@ -1,0 +1,55 @@
+# Slider from the published image, without Caddy: for a host that does HTTPS itself – an app
+# platform that takes a Compose file, Coolify, Portainer, a reverse proxy of your own. Nothing is
+# built; the image comes from ghcr.io/eigen-hq/eigen-office (amd64 and arm64, one per release).
+#
+#   SLIDER_URL=https://slider.firma.de POSTGRES_PASSWORD=$(openssl rand -hex 24) \
+#     docker compose -f docker-compose.image.yml up -d
+#   docker compose -f docker-compose.image.yml logs slider   # → /einrichtung + "Setup token: …"
+#
+# Pasted into a platform without a .env: write the values in place of the ${…}. The host's proxy
+# sends https://<SLIDER_URL> to port 8787 of the service `slider`. Everything else of .env.example
+# (login, mail, AI) can go under `environment` too, or into the setup page after the first start.
+
+name: slider
+
+services:
+  slider:
+    # A fixed version (e.g. 0.1.0) instead of the newest: SLIDER_VERSION.
+    image: ghcr.io/eigen-hq/eigen-office:${SLIDER_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      # The public address, as people open it (https, no path).
+      SLIDER_URL: ${SLIDER_URL:?SLIDER_URL is required, e.g. https://slider.firma.de}
+      DATABASE_URL: postgres://slider:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/slider
+      # Only the host's proxy reaches port 8787, so X-Forwarded-For is trustworthy. Publish the
+      # port to the internet (ports: 8787:8787) and this has to go.
+      TRUST_PROXY: '1'
+    volumes:
+      # Files, recordings and the generated keys – back this up together with Postgres.
+      - slider-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # For the host's proxy. A proxy outside Docker on the same machine: ports: ['127.0.0.1:8787:8787'].
+    expose:
+      - '8787'
+
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: slider
+      POSTGRES_USER: slider
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U slider -d slider']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  slider-data:
+  postgres-data:

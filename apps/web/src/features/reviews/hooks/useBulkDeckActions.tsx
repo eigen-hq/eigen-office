@@ -1,0 +1,237 @@
+import { useEffect, useRef, useState } from 'react';
+import type { Deck } from '@slider/shared';
+import { pluralize, withCount } from '@/lib/format';
+import {
+  useDesktopState,
+  useDeckStatuses,
+  useInvalidateDecks,
+  useRerenderDecks,
+  useUpdateDecks,
+} from '@/lib/api';
+import type { MenuAction, ShowToast } from '@/ui';
+import { DeleteDeckDialog } from '../components/DeleteDeckDialog';
+import { MoveDecksDialog } from '../components/MoveDecksDialog';
+import { failureMessage, movedFailure } from '../lib/bulk-messages';
+import { bulkRerenderProgress } from '../lib/bulk-rerender';
+import { usePinnedDecks } from './usePinnedDecks';
+import { MAX_PINNED } from '../lib/pinned-decks';
+
+const NO_IDS: readonly string[] = [];
+
+const reviews = (count: number) => pluralize(count, 'Präsentation', 'Präsentationen');
+
+const NOT_MANAGED = 'Gilt nur für Präsentationen, die du verwaltest.';
+const NOT_COMMENTABLE = 'Gilt nur für Präsentationen, die du kommentieren darfst.';
+
+/**
+ * "Neu rendern" for several decks (BER-94): starts each, then follows their status until none
+ * is rendering anymore. Lives on the page, so it keeps following after the selection changed.
+ */
+function useBulkRerender(onNotify: ShowToast) {
+  const rerender = useRerenderDecks();
+  const invalidateDecks = useInvalidateDecks();
+  const [following, setFollowing] = useState<{ ids: readonly string[]; startedAt: number }>();
+  const statuses = useDeckStatuses(following?.ids ?? NO_IDS);
+  const progress = following ? bulkRerenderProgress(statuses, following.startedAt) : undefined;
+  const done = progress ? progress.done + progress.gone : 0;
+  const gone = progress?.gone ?? 0;
+  const finished = progress?.finished ?? false;
+
+  const announced = useRef<typeof following>(undefined);
+  useEffect(() => {
+    if (!finished || !following || announced.current === following) return;
+    announced.current = following;
+    void invalidateDecks();
+    // Decks deleted (or no longer shared) meanwhile aren't reported as rendered.
+    const rendered = following.ids.length - gone;
+    if (rendered > 0) onNotify(`${reviews(rendered)} neu gerendert`);
+  }, [finished, following, gone, invalidateDecks, onNotify]);
+
+  const busy = rerender.isPending || (following !== undefined && !finished);
+  const start = (decks: readonly Deck[]) => {
+    if (busy || decks.length === 0) return;
+    const startedAt = Date.now();
+    rerender.mutate(
+      decks.map((deck) => deck.id),
+      {
+        onSuccess: (result) => {
+          const rendering = result.done.filter((entry) => entry.result.status !== 'newVersion');
+          const newVersions = result.done.length - rendering.length;
+          if (rendering.length > 0) {
+            setFollowing({ ids: rendering.map((entry) => entry.deckId), startedAt });
+          }
+          onNotify(
+            failureMessage(result, 'neu gerendert') ??
+              (newVersions > 0
+                ? `${reviews(rendering.length)} werden neu gerendert, ${pluralize(newVersions, 'neue Version wird', 'neue Versionen werden')} importiert.`
+                : `${reviews(rendering.length)} werden neu gerendert …`),
+            result.failed.length > 0 ? 'danger' : undefined,
+          );
+        },
+        onError: (error) => onNotify(error.message, 'danger'),
+      },
+    );
+  };
+  const label = !busy
+    ? 'Neu rendern'
+    : following
+      ? `Wird gerendert … ${done}/${following.ids.length}`
+      : 'Wird gerendert …';
+  return { busy, label, start };
+}
+
+/**
+ * Actions for the decks selected in "Reviews" – pin for every deck; re-render for the ones the
+ * viewer may comment on (BER-165); archive/restore and delete for the ones they manage. `onDone` clears the selection after an action.
+ */
+export function useBulkDeckActions(
+  decks: readonly Deck[],
+  {
+    workspaceId,
+    onNotify,
+    onDone,
+  }: { workspaceId: string; onNotify: ShowToast; onDone: () => void },
+) {
+  const [deleting, setDeleting] = useState<readonly Deck[] | null>(null);
+  const [moving, setMoving] = useState<readonly Deck[] | null>(null);
+  const update = useUpdateDecks();
+  const rerender = useBulkRerender(onNotify);
+  const pins = usePinnedDecks(workspaceId);
+  // The desktop app: which of them are files on this computer (they stay when deleted).
+  const desktop = useDesktopState();
+
+  const count = decks.length;
+  const managed = decks.filter((deck) => deck.permissions.canManage);
+  const isArchived = (deck: Deck) => deck.archivedAt !== null;
+  const restore = managed.length > 0 && managed.every(isArchived);
+  const toArchive = restore ? managed : managed.filter((deck) => !isArchived(deck));
+  const renderable = decks.filter(
+    (deck) => deck.permissions.canComment && deck.import.status === 'ready',
+  );
+  const allPinned = count > 0 && decks.every((deck) => pins.isPinned(deck.id));
+
+  const togglePinned = () => {
+    if (allPinned) {
+      decks.forEach((deck) => pins.unpin(deck.id));
+    } else {
+      const unpinned = decks.filter((deck) => !pins.isPinned(deck.id));
+      const left = unpinned.filter((deck) => !pins.pin(deck.id)).length;
+      if (left > 0) {
+        onNotify(
+          `Höchstens ${MAX_PINNED} Präsentationen angepinnt, ${reviews(left)} nicht angepinnt.`,
+        );
+      }
+    }
+    onDone();
+  };
+
+  const toggleArchived = () =>
+    update.mutate(
+      { deckIds: toArchive.map((deck) => deck.id), input: { archived: !restore } },
+      {
+        onSuccess: (result) => {
+          const ids = result.done.map((entry) => entry.deckId);
+          const failure = failureMessage(result, restore ? 'wiederhergestellt' : 'archiviert');
+          onNotify(
+            failure ?? `${reviews(ids.length)} ${restore ? 'wiederhergestellt' : 'archiviert'}`,
+            failure ? 'danger' : undefined,
+          );
+          onDone();
+        },
+        onError: (error) => onNotify(error.message, 'danger'),
+      },
+    );
+
+  const someUnmanaged = (applies: number) => (applies < count ? NOT_MANAGED : undefined);
+
+  const actions: MenuAction[] = [
+    // An archived presentation's pin would be gone with the next look at the list.
+    ...(decks.every(isArchived) && !allPinned
+      ? []
+      : [
+          {
+            label: allPinned ? 'Lösen' : 'Anpinnen',
+            icon: 'pushPin',
+            onSelect: togglePinned,
+            disabled: !allPinned && pins.full,
+            title: !allPinned && pins.full ? pins.limitMessage() : undefined,
+          } satisfies MenuAction,
+        ]),
+    {
+      label: withCount('Verschieben …', managed.length, count),
+      icon: 'folder',
+      onSelect: () => setMoving(managed),
+      disabled: managed.length === 0,
+      title: someUnmanaged(managed.length),
+    },
+    {
+      label: rerender.busy ? rerender.label : withCount('Neu rendern', renderable.length, count),
+      icon: 'image',
+      onSelect: () => rerender.start(renderable),
+      disabled: rerender.busy || renderable.length === 0,
+      title: decks.some((deck) => !deck.permissions.canComment) ? NOT_COMMENTABLE : undefined,
+    },
+    {
+      label: withCount(restore ? 'Wiederherstellen' : 'Archivieren', toArchive.length, count),
+      icon: restore ? 'history' : 'archive',
+      onSelect: toggleArchived,
+      disabled: update.isPending || toArchive.length === 0,
+      title: someUnmanaged(toArchive.length),
+    },
+    {
+      label: withCount('Löschen', managed.length, count),
+      icon: 'delete',
+      tone: 'danger',
+      onSelect: () => setDeleting(managed),
+      disabled: managed.length === 0,
+      title: someUnmanaged(managed.length),
+    },
+  ];
+
+  const dialog = deleting && (
+    <DeleteDeckDialog
+      decks={deleting}
+      filesStay={deleting.some((deck) => desktop?.files[deck.id])}
+      onClose={() => setDeleting(null)}
+      onDeleted={(result) => {
+        result.done.forEach((entry) => pins.unpin(entry.deckId));
+        setDeleting(null);
+        const failure = failureMessage(result, 'gelöscht');
+        onNotify(
+          failure ??
+            (deleting.length === 1
+              ? `„${deleting[0]!.title}“ gelöscht`
+              : `${reviews(result.done.length)} gelöscht`),
+          failure ? 'danger' : undefined,
+        );
+        onDone();
+      }}
+    />
+  );
+
+  const moveDialog = moving && moving.length > 0 && (
+    <MoveDecksDialog
+      decks={moving}
+      workspaceId={moving[0]!.workspaceId}
+      onClose={() => setMoving(null)}
+      onMoved={(result) => {
+        setMoving(null);
+        const failure = movedFailure(result);
+        if (failure) onNotify(failure, 'danger');
+        onDone();
+      }}
+    />
+  );
+
+  return {
+    actions,
+    /** „Löschen“ for the keyboard: there only when every picked one is the caller's to delete. */
+    remove: count > 0 && managed.length === count ? () => setDeleting(managed) : undefined,
+    dialog: (
+      <>
+        {dialog}
+        {moveDialog}
+      </>
+    ),
+  };
+}

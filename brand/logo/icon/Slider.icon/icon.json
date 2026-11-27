@@ -1,0 +1,132 @@
+{
+  "fill": "automatic",
+  "groups": [
+    {
+      "layers": [
+        {
+          "fill": "automatic",
+          "image-name": "Comment box.png",
+          "name": "Comment box",
+          "position": {
+            "scale": 0.93,
+            "translation-in-points": [96.42, -64.28]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      }
+    },
+    {
+      "layers": [
+        {
+          "fill": "automatic",
+          "image-name": "Chart.png",
+          "name": "Chart",
+          "position": {
+            "scale": 0.93,
+            "translation-in-points": [-40.92, 26.04]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      }
+    },
+    {
+      "layers": [
+        {
+          "fill": "automatic",
+          "image-name": "Roll.png",
+          "name": "Roll",
+          "position": {
+            "scale": 0.93,
+            "translation-in-points": [-29.76, -293.88]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      }
+    },
+    {
+      "layers": [
+        {
+          "fill": "automatic",
+          "glass": true,
+          "image-name": "Screen.png",
+          "name": "Screen",
+          "position": {
+            "scale": 0.93,
+            "translation-in-points": [-29.76, 3.72]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      }
+    },
+    {
+      "layers": [
+        {
+          "fill": "automatic",
+          "image-name": "Legs.png",
+          "name": "Legs",
+          "position": {
+            "scale": 0.93,
+            "translation-in-points": [-29.76, 327.36]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      }
+    },
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "Background.png",
+          "name": "Background"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": ["watchOS"],
+    "squares": "shared"
+  }
+}

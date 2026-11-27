@@ -1,0 +1,19 @@
+{
+  "name": "@slider/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./live-text": "./src/live-text.ts",
+    "./icons": "./src/icons.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "3.1.3",
+    "yjs": "13.6.27",
+    "zod": "^4.6.7"
+  }
+}

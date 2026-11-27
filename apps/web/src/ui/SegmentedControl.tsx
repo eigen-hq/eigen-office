@@ -1,0 +1,264 @@
+import type { KeyboardEvent, ReactNode } from 'react';
+import { cn } from './cn';
+import { Icon, type IconName } from './Icon';
+
+export interface Segment<T extends string> {
+  value: T;
+  label: string;
+  count?: number;
+  /** Shown before the label. */
+  icon?: IconName;
+  /** A picture of its own before the label instead of an icon (a workspace's mark, an area's dot). */
+  lead?: ReactNode;
+  /** Only its icon or picture shows; the label names it for screen readers and on hover. */
+  iconOnly?: boolean;
+  /** Not selectable here, e.g. a feature this browser lacks; `title` says why. */
+  disabled?: boolean;
+  title?: string;
+}
+
+/** xs 20px (segments inside a badge) | sm 28px (composer tabs) | md 32px (filter pills). */
+export type SegmentSize = 'xs' | 'sm' | 'md';
+export type SegmentTone = 'neutral' | 'warning';
+
+interface SegmentedControlProps<T extends string> {
+  segments: readonly Segment<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  /** Accessible name of the group, e.g. "Kommentare filtern". */
+  label: string;
+  size?: SegmentSize;
+  tone?: SegmentTone;
+  /** `soft`: segments sit in a tinted, padded track. `none`: bare (inside a glass pill). */
+  track?: 'none' | 'soft';
+  /**
+   * `radio` (default): a radio group of filter chips. `tabs`: a tab list. Both have roving focus
+   * (one Tab stop; arrow keys, Home/End select and focus the next segment, disabled ones are
+   * skipped), so the arrows never reach page shortcuts behind it. Disabled tabs stay visible.
+   */
+  mode?: 'radio' | 'tabs';
+  /** Full width, the segments grow to share it (the composer's kinds, flush with its field). */
+  fill?: boolean;
+  /** Icon and count only: the label becomes the segment's accessible name and tooltip. */
+  iconOnly?: boolean;
+  className?: string;
+}
+
+/** Track padding/radius per size, concentric with the segment radius (docs §5). */
+const trackClasses: Record<SegmentSize, string> = {
+  xs: 'gap-0.5 rounded-badge p-0.5',
+  sm: 'gap-1 rounded-control p-1',
+  md: 'gap-1 rounded-panel p-1',
+};
+
+const trackTone: Record<SegmentTone, string> = {
+  neutral: 'bg-surface-1',
+  warning: 'bg-warning/10',
+};
+
+/**
+ * Single-select row of segments (e.g. Alle | Offen | Erledigt, or Text | Audio | Video | Bild).
+ * Rendered as a radio group or a tab list, so it is keyboard and screen-reader friendly.
+ */
+export function SegmentedControl<T extends string>({
+  segments,
+  value,
+  onChange,
+  label,
+  size = 'md',
+  tone = 'neutral',
+  track = 'none',
+  mode = 'radio',
+  fill = false,
+  iconOnly = false,
+  className,
+}: SegmentedControlProps<T>) {
+  const tabs = mode === 'tabs';
+  const enabled = segments.filter((segment) => !segment.disabled);
+  // Roving focus: the selected segment takes Tab; the first enabled one if none is selected.
+  const focusable = enabled.some((segment) => segment.value === value) ? value : enabled[0]?.value;
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (enabled.length === 0) return;
+    const index = enabled.findIndex((segment) => segment.value === value);
+    // A radio group also moves with ↑/↓ (WAI-ARIA radio group); a horizontal tab list doesn't.
+    const forward = event.key === 'ArrowRight' || (!tabs && event.key === 'ArrowDown');
+    const backward = event.key === 'ArrowLeft' || (!tabs && event.key === 'ArrowUp');
+    let next: number;
+    switch (true) {
+      case forward:
+        next = (index + 1) % enabled.length;
+        break;
+      case backward:
+        next = index <= 0 ? enabled.length - 1 : index - 1;
+        break;
+      case event.key === 'Home':
+        next = 0;
+        break;
+      case event.key === 'End':
+        next = enabled.length - 1;
+        break;
+      default:
+        return;
+    }
+    // Handled: page shortcuts (e.g. the viewer's ←/→ slide navigation) skip prevented keys.
+    event.preventDefault();
+    const target = enabled[next]!;
+    onChange(target.value);
+    const chips = event.currentTarget.querySelectorAll<HTMLElement>('[data-segment]');
+    [...chips].find((chip) => chip.dataset.segment === target.value)?.focus();
+  };
+
+  return (
+    <div
+      role={tabs ? 'tablist' : 'radiogroup'}
+      aria-label={label}
+      onKeyDown={onKeyDown}
+      className={cn(
+        'flex items-center',
+        // Too narrow for its choices (a phone), the soft track takes a second line.
+        track === 'soft'
+          ? cn(!fill && 'w-fit', 'max-w-full flex-wrap', trackClasses[size], trackTone[tone])
+          : 'gap-1',
+        fill && 'w-full',
+        className,
+      )}
+    >
+      {segments.map((segment) => (
+        <FilterChip
+          key={segment.value}
+          value={segment.value}
+          selected={segment.value === value}
+          icon={segment.icon}
+          lead={segment.lead}
+          count={segment.count}
+          disabled={segment.disabled}
+          title={segment.title}
+          size={size}
+          tone={tone}
+          onClick={() => onChange(segment.value)}
+          role={tabs ? 'tab' : 'radio'}
+          tabIndex={segment.value === focusable ? 0 : -1}
+          fill={fill}
+          iconOnly={iconOnly || segment.iconOnly}
+        >
+          {segment.label}
+        </FilterChip>
+      ))}
+    </div>
+  );
+}
+
+interface FilterChipProps {
+  selected: boolean;
+  icon?: IconName | undefined;
+  lead?: ReactNode | undefined;
+  count?: number | undefined;
+  disabled?: boolean | undefined;
+  title?: string | undefined;
+  onClick: () => void;
+  children: string;
+  /** `tab`: `aria-selected`, and disabled via `aria-disabled` (stays hoverable for its title). */
+  role?: 'radio' | 'checkbox' | 'tab';
+  size?: SegmentSize | undefined;
+  tone?: SegmentTone | undefined;
+  tabIndex?: number | undefined;
+  /** Identifies the chip for roving focus (`data-segment`). */
+  value?: string | undefined;
+  /** Grows into a full-width `SegmentedControl`, its content centred. */
+  fill?: boolean | undefined;
+  /** Hides the label: it names the chip (`aria-label`) and is its tooltip unless `title` is set. */
+  iconOnly?: boolean | undefined;
+}
+
+const sizeClasses: Record<SegmentSize, string> = {
+  xs: 'h-5 gap-1 rounded-thumb px-1.5 text-caption font-medium',
+  sm: 'h-7 gap-1.5 rounded-chip pr-3 pl-2.5 text-xs font-medium',
+  md: 'h-8 gap-1.5 rounded-control px-2.5 text-body',
+};
+
+const ICON_PX: Record<SegmentSize, number> = { xs: 14, sm: 16, md: 18 };
+
+const toneClasses: Record<SegmentTone, { selected: string; idle: string }> = {
+  neutral: {
+    selected: 'bg-selected text-fg',
+    idle: 'text-fg-muted hover:bg-hover hover:text-fg',
+  },
+  warning: {
+    selected: 'bg-warning text-on-primary',
+    idle: 'text-warning hover:bg-warning/15',
+  },
+};
+
+/**
+ * Filter chip with optional icon and count. Same states as the tool bar's `IconButton`:
+ * selected is backed (`bg-selected`), the others stay bare until hover. Sits in a glass pill or a
+ * `SegmentedControl` track.
+ */
+export function FilterChip({
+  selected,
+  icon,
+  lead,
+  count,
+  disabled = false,
+  title,
+  onClick,
+  children,
+  role = 'checkbox',
+  size = 'md',
+  tone = 'neutral',
+  tabIndex,
+  value,
+  fill = false,
+  iconOnly = false,
+}: FilterChipProps) {
+  const tab = role === 'tab';
+  const states = toneClasses[tone];
+  return (
+    <button
+      type="button"
+      role={role}
+      aria-checked={tab ? undefined : selected}
+      aria-selected={tab ? selected : undefined}
+      aria-disabled={tab && disabled ? true : undefined}
+      disabled={tab ? undefined : disabled}
+      tabIndex={tab && disabled ? -1 : tabIndex}
+      aria-label={iconOnly ? children : undefined}
+      title={iconOnly ? (title ?? children) : title}
+      data-segment={value}
+      onClick={() => {
+        if (!disabled) onClick();
+      }}
+      className={cn(
+        'inline-flex shrink-0 items-center whitespace-nowrap transition-colors',
+        sizeClasses[size],
+        fill && 'flex-auto justify-center',
+        disabled
+          ? 'cursor-not-allowed text-fg-muted opacity-40'
+          : selected
+            ? cn(states.selected, size === 'md' && 'font-medium')
+            : states.idle,
+      )}
+    >
+      {lead ?? (icon && <Icon name={icon} size={ICON_PX[size]} />)}
+      {!iconOnly &&
+        (size === 'md' ? (
+          // The selected md chip is font-medium: an invisible medium copy holds that width, so
+          // selecting a segment never resizes it (or shifts its neighbours).
+          <span className="inline-grid">
+            <span className="col-start-1 row-start-1">{children}</span>
+            <span aria-hidden className="invisible col-start-1 row-start-1 font-medium">
+              {children}
+            </span>
+          </span>
+        ) : (
+          children
+        ))}
+      {count !== undefined && (
+        <span className={cn('text-xs font-medium', selected ? 'text-fg-muted' : 'text-fg-subtle')}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}

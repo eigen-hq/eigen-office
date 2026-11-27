@@ -1,0 +1,177 @@
+import { MAX_COMMENT_BODY_LENGTH, type Comment } from '@slider/shared';
+import { isApplePlatform } from '@/lib/platform';
+import { Avatar, cn, ErrorText, IconButton } from '@/ui';
+import { AttachedImages, AttachImageButton } from '../media/AttachedImages';
+import { VoiceMemoBar } from '../media/VoiceMemoBar';
+import { MediaReplyButtons } from './MediaTabs';
+import { useMentions } from './hooks/useMentions';
+import { useReplyDraft } from './hooks/useReplyDraft';
+import { MentionMenu } from './MentionMenu';
+import { MentionTextarea } from './MentionTextarea';
+
+const modKey = () => (isApplePlatform() ? '⌘' : 'Strg');
+
+interface ReplyComposerProps {
+  root: Comment;
+  deckId: string;
+  /** `panel`: bottom of the thread panel (B4). `inline`: last card of an expanded thread (B3). */
+  variant?: 'panel' | 'inline';
+  autoFocus?: boolean;
+  /** Inline only: Esc or ✕ closes the composer. */
+  onCancel?: () => void;
+  onSent?: () => void;
+}
+
+/**
+ * Text reply to a thread. Enter sends, Shift+Enter adds a line. The reply shows up right away
+ * (optimistic); on failure the text stays and the error shows inline and as a toast.
+ */
+export function ReplyComposer({
+  root,
+  deckId,
+  variant = 'panel',
+  autoFocus = false,
+  onCancel,
+  onSent,
+}: ReplyComposerProps) {
+  const draft = useReplyDraft(root, deckId, { onCancel, onSent });
+  const { body, setBody, canSend, submit, onKeyDown, textareaRef } = draft;
+  const mentions = useMentions(body, setBody, textareaRef);
+
+  const textarea = (
+    <MentionTextarea
+      {...mentions.fieldProps}
+      ref={textareaRef}
+      aria-label={`Antwort an ${root.author.name}`}
+      maxLength={MAX_COMMENT_BODY_LENGTH}
+      placeholder="Antworten …"
+      onPaste={draft.images.onPaste}
+      value={body}
+      autoFocus={autoFocus}
+      maxHeight={variant === 'inline' ? 120 : 160}
+      onKeyDown={(event) => {
+        if (!mentions.onKeyDown(event)) onKeyDown(event);
+      }}
+      className="text-body leading-4.5 text-fg placeholder:text-fg-subtle"
+    />
+  );
+  const field = (
+    <div className="relative flex min-w-0 flex-1 flex-col gap-1.5">
+      {draft.voice.on && (
+        <VoiceMemoBar
+          onChange={draft.voice.onChange}
+          onRecordingChange={draft.voice.onRecordingChange}
+          onDiscard={draft.voice.discard}
+          onSend={(options) => submit(undefined, options)}
+          onSendNow={draft.voice.sendNow}
+          disabled={draft.uploading}
+        />
+      )}
+      {/* The memo is the reply: no note beside it. */}
+      {!draft.voice.on && (
+        <>
+          <MentionMenu mentions={mentions} />
+          {textarea}
+        </>
+      )}
+      <AttachedImages attachments={draft.images.attachments} onRemove={draft.images.remove} />
+    </div>
+  );
+
+  const error = (draft.error || draft.images.error) && (
+    <ErrorText role="alert" size="xs">
+      {draft.error?.message ?? draft.images.error}
+    </ErrorText>
+  );
+  const attach = (
+    <AttachImageButton
+      onPick={(files) => void draft.images.attach(files)}
+      busy={draft.images.busy}
+      disabled={draft.uploading || draft.images.room === 0}
+      size="compact"
+    />
+  );
+  // Same ✨ as the comment composer: sends the reply and has the AI change the slide (⌘↵).
+  const askAi = (size: 'xs' | 'sm', className?: string) =>
+    draft.aiAvailable && (
+      <IconButton
+        icon="autoAwesome"
+        label="Senden und die KI die Folie ändern lassen"
+        title={`Senden und an die KI geben (${modKey()}↵)`}
+        size={size}
+        disabled={!canSend}
+        onClick={() => submit(undefined, { askAi: true })}
+        className={className}
+      />
+    );
+
+  if (variant === 'inline') {
+    return (
+      <form
+        onSubmit={submit}
+        className={cn(
+          'glass flex flex-col gap-2 rounded-panel px-3.5 py-3',
+          'focus-within:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--card-accent)_45%,transparent)]!',
+        )}
+      >
+        <header className="flex min-w-0 items-center gap-2">
+          <Avatar author={draft.author} size={24} />
+          <span className="truncate text-xs font-medium text-fg">{draft.author.name}</span>
+          <span className="shrink-0 text-caption text-fg-subtle">jetzt</span>
+        </header>
+        <div className="flex items-end gap-2 rounded-control bg-well-dark py-1.5 pr-2 pl-3">
+          <div className="min-w-0 flex-1 overflow-hidden py-[3px]">{field}</div>
+          {!draft.voice.on && attach}
+          <IconButton
+            icon="close"
+            label="Antwort verwerfen"
+            title="Verwerfen (Esc)"
+            variant="subtle"
+            size="xs"
+            onClick={draft.cancel}
+          />
+          {askAi('xs')}
+          <IconButton
+            type="submit"
+            icon="arrowUpward"
+            label="Antwort senden"
+            title="Senden (Enter)"
+            size="xs"
+            iconTone="success"
+            disabledStyle="dim"
+            disabled={!canSend}
+          />
+        </div>
+        {error}
+      </form>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="flex flex-col gap-2 border-t border-hairline px-5 pt-3.5 pb-[18px]"
+    >
+      <div className="flex items-end gap-2">
+        <div className="field-well focus-field flex min-h-10 min-w-0 flex-1 items-end gap-0.5 rounded-control py-1.5 pr-1 pl-3.5">
+          <div className="min-w-0 flex-1 overflow-hidden py-[5px]">{field}</div>
+          {/* The memo has the row: its own pause, send and bin. */}
+          {!draft.voice.on && attach}
+          {!draft.voice.on && <MediaReplyButtons root={root} voice={draft.voice} />}
+        </div>
+        {askAi('sm', 'mb-1')}
+        <IconButton
+          type="submit"
+          icon="arrowUpward"
+          label="Antwort senden"
+          title="Senden (Enter)"
+          variant="primary"
+          size="md"
+          iconSize={20}
+          disabled={!canSend}
+        />
+      </div>
+      {error}
+    </form>
+  );
+}

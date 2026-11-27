@@ -1,0 +1,228 @@
+name: CI
+
+# Every check of the repository: lint, typecheck, build, the Vitest suite (API on PGlite in five
+# groups), e2e, Postgres driver/migrations, the container image built and smoke-tested (amd64 and
+# arm64), Caddyfiles and the secret scan. It runs by hand (Actions → CI → Run workflow) and is
+# called by publish.yml on every release before anything is deployed – a release whose checks fail
+# goes nowhere. What a release builds and uploads (container image, desktop apps) is release.yml,
+# after these checks.
+#
+# Pushes to main, tags and pull requests start no run (secrets.yml scans every push).
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Tag or commit to check (publish.yml passes the release tag)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# By event too: called from publish.yml, `github` is the caller's (event `release`, the tag's ref),
+# so the run the tag's own push starts here would share the group and cancel the release's checks
+# (v1.6.1).
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, typecheck, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # Vite runs on Node.
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run build
+
+  # The Vitest suite on six runners: the API tests in five groups of about equal length
+  # (scripts/api-test-group.ts – each test starts its own database, so they dominate), everything
+  # else together. The API tests run one at a time: on a 2-core runner two of them, each with its
+  # own LibreOffice, ran out of time.
+  test:
+    name: Tests (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: API 1/5
+            run: bunx vitest run --project api $(bun scripts/api-test-group.ts 1 5) --maxWorkers=1
+          - name: API 2/5
+            run: bunx vitest run --project api $(bun scripts/api-test-group.ts 2 5) --maxWorkers=1
+          - name: API 3/5
+            run: bunx vitest run --project api $(bun scripts/api-test-group.ts 3 5) --maxWorkers=1
+          - name: API 4/5
+            run: bunx vitest run --project api $(bun scripts/api-test-group.ts 4 5) --maxWorkers=1
+          - name: API 5/5
+            run: bunx vitest run --project api $(bun scripts/api-test-group.ts 5 5) --maxWorkers=1
+          - name: web, packages
+            run: bunx vitest run --project web --project web-dom --project pptx --project odp --project shared --maxWorkers=2
+          # The desktop apps' shared service with real processes (desktop/service.mjs): the one
+          # place its Linux side runs – how a process is told apart differs there.
+          - name: desktop service
+            run: bun run --filter @slider/web build && bun run --cwd desktop check:service
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # Vitest runs on Node.
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: bun install --frozen-lockfile
+      - run: ${{ matrix.run }}
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # Playwright and Vite run on Node.
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: bun install --frozen-lockfile
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+      - name: Install chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install chromium system dependencies
+        if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - run: bun run e2e
+      # Once more against the production build, served by the API itself (WEB_DIST_DIR) like in
+      # the container: built chunks, lazy routes, SPA fallback, document headers.
+      - run: bun run e2e:bundle
+      - name: Upload report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/.report
+            e2e/.results
+          retention-days: 7
+
+  # The production driver, migration idempotency, upserts and transaction rollback.
+  # Business behavior is covered by the PGlite suite above instead of repeated here.
+  postgres:
+    name: Postgres driver and migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Same major as deploy/docker-compose.yml.
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: bun install --frozen-lockfile
+      - run: bunx vitest run --project api apps/api/test/postgres.test.ts --maxWorkers=2
+
+  # Builds the Dockerfile for both platforms self-hosters run and starts each like a self-hoster
+  # would. arm64 (e.g. Hetzner CAX) is built and run under QEMU, which takes long (the repository
+  # is public, its Actions minutes are free). Each architecture has its own build cache scope,
+  # which release.yml builds the published image from.
+  image-smoke:
+    name: Container image ${{ matrix.arch }} (build + smoke test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      SMOKE_PLATFORM: linux/${{ matrix.arch }}
+      SMOKE_WAIT: ${{ matrix.arch == 'arm64' && 600 || 90 }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          push: false
+          load: true
+          tags: slider:smoke
+          cache-from: |
+            type=gha,scope=smoke-${{ matrix.arch }}
+            type=gha
+          cache-to: type=gha,mode=max,scope=smoke-${{ matrix.arch }}
+      - run: scripts/smoke-image.sh slider:smoke
+
+  # The Caddyfiles of deploy/ (built-in and shared Caddy, with the sites shipped for them),
+  # parsed and provisioned by the caddy:2 image Compose runs – with and without Cloudflare.
+  caddy:
+    name: Caddyfiles (caddy adapt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - run: scripts/check-caddyfiles.sh
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      # Full-history scan with the gitleaks CLI. (gitleaks-action breaks on a repo's first push,
+      # where the root commit has no parent to diff against.)
+      - name: Scan history for secrets
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo"
+          ghcr.io/gitleaks/gitleaks:v8.30.1 git --redact --verbose /repo

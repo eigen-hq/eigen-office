@@ -1,0 +1,305 @@
+import { describe, expect, it } from 'vitest';
+import { ApiError } from '../src/http/errors';
+import {
+  assertPublicHttpsUrl,
+  fetchHop,
+  fileNameFor,
+  isHtmlResponse,
+  isPdfBytes,
+  readBodyCapped,
+  redirectTarget,
+  safeFetch,
+  streamBodyCapped,
+  type LookupAll,
+} from '../src/sources/safe-fetch';
+import { publicLookup } from './helpers';
+
+const codeOf = async (promise: Promise<unknown>) => {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof ApiError ? error.code : String(error);
+  }
+  return 'resolved';
+};
+
+describe('assertPublicHttpsUrl', () => {
+  it('accepts only https hosts that resolve to public addresses', async () => {
+    await expect(
+      assertPublicHttpsUrl(new URL('https://example.com/a.pptx'), publicLookup),
+    ).resolves.toEqual([{ address: '203.0.113.10' }]);
+
+    // plain http, localhost and IP literals are judged without asking DNS
+    const noDns: LookupAll = async () => {
+      throw new Error('DNS must not be asked');
+    };
+    for (const url of [
+      'http://example.com/',
+      'https://localhost/',
+      'https://api.localhost/',
+      'https://127.0.0.1/',
+      'https://[::1]/',
+    ]) {
+      expect(await codeOf(assertPublicHttpsUrl(new URL(url), noDns))).toBe('unsupported_link');
+    }
+    expect(await codeOf(assertPublicHttpsUrl(new URL('https://203.0.113.10/'), noDns))).toBe(
+      'resolved',
+    );
+
+    const mixed: LookupAll = async () => [{ address: '203.0.113.10' }, { address: '10.0.0.1' }];
+    const none: LookupAll = async () => [];
+    const failing: LookupAll = async () => {
+      throw new Error('ENOTFOUND');
+    };
+    expect(await codeOf(assertPublicHttpsUrl(new URL('https://x.example/'), mixed))).toBe(
+      'unsupported_link',
+    );
+    expect(await codeOf(assertPublicHttpsUrl(new URL('https://x.example/'), none))).toBe(
+      'unsupported_link',
+    );
+    expect(await codeOf(assertPublicHttpsUrl(new URL('https://nope.example/'), failing))).toBe(
+      'source_not_found',
+    );
+  });
+});
+
+describe('fetchHop', () => {
+  const options = (fetch: (input: string | URL, init?: RequestInit) => Promise<Response>) => ({
+    fetch,
+    lookup: publicLookup,
+    maxBytes: 1024,
+  });
+
+  it('never follows redirects itself, sets a deadline and maps failures to source_unreachable', async () => {
+    let seen: RequestInit | undefined;
+    await fetchHop(
+      new URL('https://example.com/'),
+      options(async (_input, init) => {
+        seen = init;
+        return new Response('ok');
+      }),
+    );
+    expect(seen?.redirect).toBe('manual');
+    expect(seen?.signal).toBeInstanceOf(AbortSignal);
+
+    const failing = options(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const timeout = options(async () => {
+      throw new DOMException('timed out', 'TimeoutError');
+    });
+    expect(await codeOf(fetchHop(new URL('https://example.com/'), failing))).toBe(
+      'source_unreachable',
+    );
+    await expect(fetchHop(new URL('https://example.com/'), timeout)).rejects.toThrow(
+      'Der Server hinter dem Link antwortet nicht.',
+    );
+  });
+
+  it('pins the checked address, naming the host in Host and TLS, unless there is nothing to pin', async () => {
+    const seen: { url: string; init?: RequestInit }[] = [];
+    const fetch = async (input: string | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), init });
+      return new Response('ok');
+    };
+    const tlsOf = (init?: RequestInit) =>
+      (init as { tls?: { serverName?: string; checkServerIdentity?: unknown } } | undefined)?.tls;
+
+    const dual: LookupAll = async () => [{ address: '2001:4860::8888' }, { address: '8.8.8.8' }];
+    await fetchHop(
+      new URL('https://cloud.example.de:8443/a?b=1'),
+      { fetch, lookup: dual, maxBytes: 1024, pin: true },
+      { headers: { Authorization: 'Basic x' } },
+    );
+    expect(seen[0]?.url).toBe('https://8.8.8.8:8443/a?b=1'); // IPv4 first
+    const headers = new Headers(seen[0]?.init?.headers);
+    expect(headers.get('host')).toBe('cloud.example.de:8443');
+    expect(headers.get('authorization')).toBe('Basic x');
+    expect(tlsOf(seen[0]?.init)?.serverName).toBe('cloud.example.de');
+    expect(tlsOf(seen[0]?.init)?.checkServerIdentity).toBeTypeOf('function');
+
+    const v6: LookupAll = async () => [{ address: '2001:4860::8888' }];
+    await fetchHop(new URL('https://example.com/x'), { fetch, lookup: v6, maxBytes: 1, pin: true });
+    expect(seen[1]?.url).toBe('https://[2001:4860::8888]/x');
+
+    // IP literals, trusted servers and unpinned fetches stay as they are
+    seen.length = 0;
+    await fetchHop(new URL('https://203.0.113.10/x'), {
+      fetch,
+      lookup: publicLookup,
+      maxBytes: 1,
+      pin: true,
+    });
+    await fetchHop(new URL('http://cloud.intranet/x'), {
+      fetch,
+      lookup: publicLookup,
+      maxBytes: 1,
+      pin: true,
+      trusted: () => true,
+    });
+    await fetchHop(new URL('https://example.com/x'), { fetch, lookup: publicLookup, maxBytes: 1 });
+    expect(seen.map((s) => s.url)).toEqual([
+      'https://203.0.113.10/x',
+      'http://cloud.intranet/x',
+      'https://example.com/x',
+    ]);
+    expect(seen.every((s) => tlsOf(s.init) === undefined)).toBe(true);
+  });
+});
+
+describe('responses', () => {
+  it('resolves redirect targets and reads bodies only up to the cap', async () => {
+    const from = new URL('https://example.com/dir/file');
+    const redirect = (status: number, location?: string) =>
+      new Response(null, { status, headers: location ? { location } : {} });
+    expect(redirectTarget(redirect(302, '../other'), from)?.href).toBe('https://example.com/other');
+    expect(redirectTarget(redirect(301, 'https://cdn.example/x'), from)?.href).toBe(
+      'https://cdn.example/x',
+    );
+    expect(redirectTarget(new Response('ok'), from)).toBeNull();
+    expect(redirectTarget(redirect(304, '/x'), from)).toBeNull();
+    expect(redirectTarget(redirect(302), from)).toBeNull();
+    expect(redirectTarget(redirect(302, 'http://[broken'), from)).toBeNull();
+
+    // Sent on to another server, the login stays behind; a body is not sent on at all.
+    const options = (fetch: (input: string | URL, init?: RequestInit) => Promise<Response>) => ({
+      fetch,
+      lookup: publicLookup,
+      maxBytes: 1024,
+    });
+    const seen: { host: string; authorization: string | null; accept: string | null }[] = [];
+    const hops = options(async (input, init) => {
+      const headers = new Headers(init?.headers);
+      seen.push({
+        host: headers.get('host') ?? new URL(String(input)).host,
+        authorization: headers.get('authorization'),
+        accept: headers.get('accept'),
+      });
+      return seen.length < 3
+        ? redirect(302, seen.length === 1 ? '/next' : 'https://cdn.example/file')
+        : new Response('ok');
+    });
+    const init = { headers: { Authorization: 'Bearer geheim', Accept: 'text/plain' } };
+    await safeFetch(new URL('https://example.com/a'), hops, init);
+    expect(seen.map((hop) => [hop.host, hop.authorization, hop.accept])).toEqual([
+      ['example.com', 'Bearer geheim', 'text/plain'],
+      ['example.com', 'Bearer geheim', 'text/plain'],
+      ['cdn.example', null, 'text/plain'],
+    ]);
+    expect(
+      await codeOf(
+        safeFetch(
+          new URL('https://example.com/a'),
+          options(async () => redirect(307, 'https://cdn.example/file')),
+          { method: 'POST', body: 'x' },
+        ),
+      ),
+    ).toBe('source_unreachable');
+    // The same server's `https` is no other server (one in the own network, asked over `http`):
+    // login and body go along – not to another port, and never back down to `http`.
+    const upgraded = async (from: string, to: string) => {
+      const logins: (string | null)[] = [];
+      const fetch = {
+        ...options(async (_input, sent) => {
+          logins.push(new Headers(sent?.headers).get('authorization'));
+          return logins.length === 1 ? redirect(307, to) : new Response('ok');
+        }),
+        trusted: () => true,
+      };
+      const post = { method: 'POST', body: 'x', headers: { Authorization: 'Bearer geheim' } };
+      const code = await codeOf(safeFetch(new URL(from), fetch, post));
+      return code === 'resolved' ? logins : code;
+    };
+    expect(await upgraded('http://example.com/a', 'https://example.com/a')).toEqual([
+      'Bearer geheim',
+      'Bearer geheim',
+    ]);
+    expect(await upgraded('http://example.com/a', 'https://example.com:8443/a')).toBe(
+      'source_unreachable',
+    );
+    expect(await upgraded('https://example.com/a', 'http://example.com/a')).toBe(
+      'source_unreachable',
+    );
+
+    const streamOf = (chunks: Uint8Array[], fail = false) =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          if (fail) controller.error(new Error('connection reset'));
+          else controller.close();
+        },
+      });
+    const bytes = await readBodyCapped(
+      new Response(streamOf([new Uint8Array([1, 2]), new Uint8Array([3])])),
+      3,
+    );
+    expect([...bytes]).toEqual([1, 2, 3]);
+    expect(await readBodyCapped(new Response(null), 3)).toEqual(new Uint8Array());
+    const declared = new Response('12345', { headers: { 'content-length': '5' } });
+    expect(await codeOf(readBodyCapped(declared, 4))).toBe('file_too_large');
+    const streamed = new Response(streamOf([new Uint8Array(3), new Uint8Array(3)]));
+    expect(await codeOf(readBodyCapped(streamed, 4))).toBe('file_too_large');
+    await expect(
+      readBodyCapped(new Response(streamOf([new Uint8Array(1)], true)), 10),
+    ).rejects.toThrow('Die Datei konnte nicht vollständig geladen werden.');
+
+    // Passed on as it comes (a Nextcloud file for the material): the same cap, `ended` once.
+    let ended = 0;
+    const end = () => (ended += 1);
+    const passed = streamBodyCapped(
+      new Response(streamOf([new Uint8Array([1, 2]), new Uint8Array([3])])),
+      3,
+      end,
+    );
+    expect([...new Uint8Array(await new Response(passed).arrayBuffer())]).toEqual([1, 2, 3]);
+    expect(ended).toBe(1);
+    expect(() =>
+      streamBodyCapped(new Response('12345', { headers: { 'content-length': '5' } }), 4, end),
+    ).toThrow('Die Datei ist zu groß');
+    const over = streamBodyCapped(
+      new Response(streamOf([new Uint8Array(3), new Uint8Array(3)])),
+      4,
+      end,
+    );
+    expect(await codeOf(new Response(over).arrayBuffer())).toBe('file_too_large');
+    expect(ended).toBe(2);
+    const broken = streamBodyCapped(new Response(streamOf([new Uint8Array(1)], true)), 10, end);
+    await expect(new Response(broken).arrayBuffer()).rejects.toThrow(
+      'Die Datei konnte nicht vollständig geladen werden.',
+    );
+    const stopped = streamBodyCapped(new Response(streamOf([new Uint8Array(1)])), 10, end);
+    await stopped.cancel();
+    expect(ended).toBe(4);
+  });
+
+  it('recognises PDF and HTML content and names files safely as .pptx', () => {
+    expect(isPdfBytes(new TextEncoder().encode('%PDF-1.7'))).toBe(true);
+    expect(isPdfBytes(new TextEncoder().encode('%PDF'))).toBe(false);
+    expect(isPdfBytes(new TextEncoder().encode('<html>'))).toBe(false);
+    expect(
+      isHtmlResponse(new Response('', { headers: { 'content-type': 'Text/HTML; charset=utf-8' } })),
+    ).toBe(true);
+    expect(
+      isHtmlResponse(
+        new Response(new Uint8Array(), { headers: { 'content-type': 'application/octet-stream' } }),
+      ),
+    ).toBe(false);
+
+    const url = (path: string) => new URL(`https://example.com${path}`);
+    const withHeader = (value: string) =>
+      new Response('', { headers: { 'content-disposition': value } });
+    expect(fileNameFor(withHeader('attachment; filename="Q3.pptx"'), url('/x/y.pptx'))).toBe(
+      'Q3.pptx',
+    );
+    expect(fileNameFor(new Response(''), url('/files/Gro%C3%9Fe%20Pr%C3%A4si.pptx'))).toBe(
+      'Große Präsi.pptx',
+    );
+    expect(fileNameFor(new Response(''), url('/download.php'))).toBe('download.pptx');
+    expect(fileNameFor(new Response(''), url('/Deck.PPTX'))).toBe('Deck.PPTX');
+    expect(fileNameFor(withHeader('attachment; filename="a/b\\\\c.pptx"'), url('/'))).toBe(
+      'abc.pptx',
+    );
+    expect(fileNameFor(new Response(''), url('/'))).toBe('Präsentation.pptx');
+    expect(fileNameFor(new Response(''), url('/bad%E0name.pptx'))).toBe('bad%E0name.pptx');
+  });
+});

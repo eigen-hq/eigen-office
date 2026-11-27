@@ -1,0 +1,2179 @@
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import { blankOdp } from '@slider/odp';
+import {
+  API_PREFIX,
+  BOARD_NOTE,
+  DECK_KINDS,
+  DECK_SEARCH_MIN_LENGTH,
+  MATERIAL_CARD,
+  MAX_BOARD_NOTE_LENGTH,
+  MAX_CREATED_SLIDES,
+  MIN_CREATED_SLIDES,
+  boardUrlSchema,
+  commentWords,
+  createCommentInputSchema,
+  isPathStroke,
+  deckKindSchema,
+  markdownToRich,
+  searchFold,
+  type BoardFrame,
+  type AiProposal,
+  type Comment,
+  type Deck,
+  type DeckSearchHit,
+  type Slide,
+  type Viewer,
+  type WorkspaceMember,
+  DECK_TRASH_DAYS,
+  SLIDER_TEMPLATE_PREFIX,
+} from '@slider/shared';
+import { z } from 'zod';
+import { openToViewer, requireDeckAccess, type DeckViewerAccess } from '../auth/access';
+import {
+  aiProposals,
+  deckBoardItems,
+  deckMaterials,
+  decks,
+  materialChunks,
+  slideVersions,
+  workspaceMasters,
+  type DeckRow,
+} from '../db/schema';
+import type { AppDeps } from '../deps';
+import { aiLimits } from '../http/ai-limits';
+import { ApiError } from '../http/errors';
+import { countImport } from '../http/import-limit';
+import { createProposal, listProposals, reapplyProposal, revertProposal } from './ai-proposals';
+import { createComment, listComments, updateComment } from './comments';
+import { getDeckAccess } from './deck-access';
+import { placeDeck, placeNew, setDeckAccess } from './deck-places';
+import { exportedFile } from './edits/export';
+import { blocker, currentRevision, editTarget } from './edits/target';
+import { getCreation, offerCreation, startCreation } from './deck-creation';
+import { searchDecks } from './deck-search';
+import { createDeckFromFile, listWorkspaceDecks, toDeckDto, trashDeck, updateDeck } from './decks';
+import {
+  addMaterial,
+  createBoardItem,
+  deleteBoardItem,
+  moveBoard,
+  updateBoardItem,
+} from './materials';
+import { deckBoard, ownedBy, type BoardOwner } from './board-owner';
+import {
+  MATERIAL_TOOLS,
+  asJpeg,
+  describeMaterial,
+  matchOf,
+  materialsOf,
+  runMaterialTool,
+} from './material-tools';
+import { listSlides } from './slides';
+import { deckFileFromMaster, listWorkspaceMasters } from './workspace-masters';
+import { listWorkspaces, resolveUploadWorkspace } from './workspaces';
+import { listMembers } from './workspaces/members';
+import { rolesOf } from './workspaces/roles';
+
+/*
+ * Slider's MCP server (`routes/mcp.ts`): the tools an AI app (Claude, ChatGPT, Claude Code …)
+ * uses for its person, with their rights – find and read presentations, look at slides, read
+ * comments and the material on a deck's board, put research there (notes as stickers, links,
+ * files), comment and tick comments off, have Slider's AI change slides (and undo it), manage a
+ * deck (rename, archive, access, download, delete), and start a new deck that Slider's
+ * own AI builds from its board. A connection held to one workspace sees only that one. Texts
+ * for the AI in English, what people see on the board in the language the app writes.
+ */
+
+/** Who is calling: the person, and the workspace the connection is held to (`null`: all). */
+export interface McpCaller {
+  viewer: Viewer;
+  workspaceId: string | null;
+}
+
+export type McpContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string }
+  /** A file handed over (download_presentation): its bytes, base64. */
+  | { type: 'resource'; resource: { uri: string; mimeType: string; blob: string } }
+  /** Text for the app rather than the model (show_presentation's A2UI card). */
+  | { type: 'resource'; resource: { uri: string; mimeType: string; text: string } };
+
+export interface McpToolResult {
+  content: McpContent[];
+  /** Data for an MCP App page (show_presentation's A2UI card). */
+  structuredContent?: Record<string, unknown>;
+  isError?: boolean;
+}
+
+export interface McpTool {
+  name: string;
+  title: string;
+  description: string;
+  inputSchema: { type: 'object'; properties: Record<string, unknown>; required?: string[] };
+  annotations: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
+}
+
+export const MCP_INSTRUCTIONS = `Office is a team's suite of apps in workspaces: presentations (Slider, where a team reviews and builds them), files (Cloud), text documents (Writer), messages and mail (Sender), to-dos and agents. Presentations live in workspaces. Every presentation has its material – what people collected for it, never part of the deck: files (PDFs, documents, spreadsheets, pictures), links and notes (rich text). Everyone on the presentation sees it under „Material“ in its menu.
+
+How to work with it:
+- Find: search looks through everything at once (presentations, their comments, the files and notes of their material) and fetch reads a hit; list_presentations lists presentations (by title or text on slides and in comments), then get_presentation for its slides' text and its material. view_slide shows a slide as it looks; list_comments reads the feedback.
+- Research: list_materials, search_materials, read_material, read_sheet and view_material read the material's files.
+- Contribute: add_note adds a note to the material (Markdown; one finding or summary per note, with its sources), add_link a web address, add_file a file (text you wrote, or its bytes as base64 – download it yourself first). add_comment comments on a slide. Everything shows at once to everyone on the deck, under the person's name – write in the deck's language, as the person would.
+- Change slides: edit_slides has Slider's own AI edit the real slides (it works like a person asking it in a comment; anyone can undo it). Look at the result with view_slide; undo_edit takes a change back.
+- Review: read the slides (get_presentation, view_slide), then add_comment one comment per point, on its slide.
+- Carry out feedback: list_comments, then for each open comment edit_slides with what it asks, check it with view_slide, and resolve_comment it once done. Answer with add_comment (reply_to) where something stays open or you need the person.
+- Manage: update_presentation renames or archives it; set_access says who may open it; download_presentation hands over the file (PDF, the presentation file, a slide as a picture); delete_presentation deletes it for everyone – only when the person asked for exactly that.
+- New presentation: create_presentation makes an empty one; add its material (add_note, add_file, add_link); then build_presentation has Slider's AI build the slides from the material and a description (it takes a few minutes; get_presentation shows how far it is).
+- Files (Cloud): beside the presentations every workspace has its files – each person's own („Meine Dateien“) and areas („Bereiche“) shared by a team, with folders in both. list_folder looks around (without a place: the own files and the areas), list_tree shows everything below a folder or an area in one call, search_files finds by name, read_file reads PDFs, documents, sheets and text. write_file writes a new text file; create_folder, move_files, rename_file and delete_files order them; a whole new order – many folders, moves and names – goes to reorganize_files in one call, after list_tree. Every presentation is a file there too – a new one lies in the person's own files („Meine Dateien“) – and where it lies says who sees it: to put a presentation into a folder or an area, move_files with its presentation id. Never write a file with a link to it instead. A Markdown file (.md) opens in Cloud as a page – headings, lists, check lists, tables, and diagrams shown on it by their line. Diagrams – a flow, dependencies, a structure drawn as boxes and arrows – are files of their own: create_diagram draws one, read_diagram reads it, edit_diagram changes it.
+- Areas and sharing: list_areas shows the areas with their people; create_area makes one (open to the workspace, or people_only with its members), update_area renames it, opens or closes it and says who its people are. file_details shows where a file lies, who reaches it, its shares and versions; share_file shares a file or folder with one person of the workspace (view or edit), unshare_file ends that – only when the person asked for it. Links for people outside are made in Cloud by the person.
+- Deleted and versions: delete_files only moves to „Gelöscht“ – list_deleted shows what lies there, restore_files brings it back; restore_version makes an earlier version of a file its newest again, nothing is lost by it.
+- Text documents (Writer): list_documents finds them, read_document reads one with its paragraphs' ids, create_document makes one – with its text, in a folder or an area if said – and edit_document changes paragraphs by id (read it first; people who have it open see the change, the version before stays). A document is a file in Cloud: move_files, rename_file, delete_files, share_file and file_details take its id.
+- To-dos („Aufgaben“ in Cloud – call them so to the person): list_todos shows the person's own to-dos (only they see them) and each area's they see – an area's list is its project plan, with status, priority, who does it, start and due date, as in Linear; a place's to-dos stand in projects ("Allgemein" when none) and milestones, in the order put by hand (update_todo's before); update_todo's blocked_by says what one waits on („Wartet auf“). read_todo reads one (by id or number), create_todo makes one (with area: in that area), update_todo changes it – set its status as the work goes on.
+- Messages (Sender): list_conversations shows the person's conversations (areas' channels, groups, direct ones), read_conversation reads one (files named, a voice message or video with what was said in it), post_message writes there under the person's name – Markdown, Cloud files along, an answer to a message (reply_to) – only a message they asked for.
+- Mail („Post“ in Sender and Cloud): list_mailboxes, search_mail and read_mail_thread read the person's own mail; draft_mail_reply leaves a reply and draft_mail a new mail as their draft (find_mail_address finds whom it goes to – never guess one), file_mail_attachment puts an attachment into the files, mark_mail marks read, unread or spam. These act at once, only on the person's own word: send_mail sends a draft they could see (it waits a minute in the outbox), delete_mail deletes a conversation for good, unsubscribe_mail leaves a newsletter's list; list_mail_rules, add_mail_rule and delete_mail_rule block or trust senders; prepare_mailbox, update_mailbox and check_mailbox set up and look after a mailbox – passwords the person types in themselves.
+- Agents: list_agents shows Cloud's agents the person sees, read_agent what one said last; message_agent gives one an order – or, without agent, starts a new one – which then works on the server with the person's rights.
+- Settings: read_settings shows the person's own (name, colour, the voice in calls, how often mail is checked) and what only their browser keeps. Changing them is the person's own, in Office under „Einstellungen“.
+Presentations, slides and the files, notes and links of their material are named by their ids; links to open them come with the answers – give them to the person.`;
+
+const presentationProperty = {
+  presentation: {
+    type: 'string',
+    description:
+      'The presentation: its id (list_presentations), its Slider link, or its exact title.',
+  },
+};
+
+/** The board tools Slider's own AI uses, with the presentation added. */
+const materialTools: McpTool[] = MATERIAL_TOOLS.filter(
+  (tool) => tool.name !== 'list_materials',
+).map((tool) => {
+  const schema = tool.input_schema as {
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+  return {
+    name: tool.name,
+    title: {
+      read_material: 'Read a file of the material',
+      read_sheet: 'Read a spreadsheet of the material',
+      search_materials: "Search the material's files",
+      view_material: 'Look at a file of the material',
+    }[tool.name]!,
+    description: tool.description ?? '',
+    inputSchema: {
+      type: 'object',
+      properties: { ...presentationProperty, ...schema.properties },
+      required: ['presentation', ...(schema.required ?? [])],
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  };
+});
+
+const read = { readOnlyHint: true, openWorldHint: false } as const;
+
+export const MCP_TOOLS: McpTool[] = [
+  {
+    name: 'search',
+    title: 'Search Office',
+    description:
+      'Searches everything the person can open in Office at once: presentations (titles, slide text, comments) and their material (the text of files – PDFs, documents, spreadsheets –, notes). Returns JSON `{"results": [{"id", "title", "url", "snippet"}]}`, best first; `fetch` reads a result in full.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description:
+            'Words to look for (any case, accents ignored; places with most of them first).',
+        },
+      },
+      required: ['query'],
+    },
+    annotations: read,
+  },
+  {
+    name: 'fetch',
+    title: 'Read a search result',
+    description:
+      'Reads one result of `search` in full by its id: a presentation (its slides\' text and material), a file of a material (its whole text, page by page) or a note. Returns JSON `{"id", "title", "text", "url", "metadata"}`.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'The id from search.' } },
+      required: ['id'],
+    },
+    annotations: read,
+  },
+  {
+    name: 'list_workspaces',
+    title: 'List workspaces',
+    description:
+      "The person's workspaces (id, name, their role) with the templates presentations can be made from.",
+    inputSchema: { type: 'object', properties: {} },
+    annotations: read,
+  },
+  {
+    name: 'list_presentations',
+    title: 'Find presentations',
+    description:
+      'Presentations the person can open, most recently changed first: id, title, workspace, slides, open comments, link. `query` finds titles and text on slides and in comments (with the places it was found).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Words to look for (any case, accents ignored).' },
+        workspace: { type: 'string', description: 'Only this workspace (id or name).' },
+        archived: { type: 'boolean', description: 'Also archived presentations (default false).' },
+        limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Default 30.' },
+      },
+    },
+    annotations: read,
+  },
+  {
+    name: 'get_presentation',
+    title: 'Read a presentation',
+    description:
+      "A presentation: title, workspace, link, what the person may do, every slide's number, title and text (hidden ones marked) with open comments, its material, and – while Slider's AI builds it – how far it is.",
+    inputSchema: {
+      type: 'object',
+      properties: presentationProperty,
+      required: ['presentation'],
+    },
+    annotations: read,
+  },
+  {
+    name: 'view_slide',
+    title: 'Look at a slide',
+    description: 'A slide as it looks (a picture), with its text and the comments on it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        slide: { type: 'integer', minimum: 1, description: 'Its number (1 = the first).' },
+      },
+      required: ['presentation', 'slide'],
+    },
+    annotations: read,
+  },
+  {
+    name: 'list_comments',
+    title: 'Read comments',
+    description:
+      'The comments on a presentation with their replies: who, on which slide, open or done. Default: open ones only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        slide: { type: 'integer', minimum: 1, description: 'Only on this slide.' },
+        done: { type: 'boolean', description: 'Also those marked done (default false).' },
+      },
+      required: ['presentation'],
+    },
+    annotations: read,
+  },
+  {
+    name: 'add_comment',
+    title: 'Comment on a slide',
+    description:
+      "Writes a comment on a slide (or on the whole presentation without `slide`), or a reply to a comment (`reply_to`). Shown at once under the person's name.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        text: { type: 'string', minLength: 1, maxLength: 10000 },
+        slide: { type: 'integer', minimum: 1 },
+        reply_to: {
+          type: 'string',
+          description: 'The id of the comment to answer (list_comments).',
+        },
+      },
+      required: ['presentation', 'text'],
+    },
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'resolve_comment',
+    title: 'Mark a comment done',
+    description:
+      "Marks a comment's thread done – as the person ticks it off in Slider – or open again (`done`: false). Do it once its feedback is carried out (e.g. after edit_slides). A thread whose change Slider's AI made from that very thread is done already.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        comment: {
+          type: 'string',
+          description: 'The id of a comment of the thread (list_comments).',
+        },
+        done: { type: 'boolean', description: 'Default true.' },
+      },
+      required: ['presentation', 'comment'],
+    },
+    annotations: { idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'edit_slides',
+    title: 'Have Slider’s AI change slides',
+    description:
+      "Has Slider's own AI change the presentation's real slides, as a person asks it in a comment: `instruction` says what (rewrite or shorten text, restructure a slide, add a chart or picture, add, split, reorder or delete slides …), starting at slide `slide`. It is written as a comment under the person's name; the change lands at once, and anyone can undo it in that comment's thread. Waits up to two minutes and returns what the AI did – look at the result with view_slide. Be specific (numbers, wording, which slides); one request per call. When it carries out someone's comment, mark that comment done with resolve_comment afterwards. Needs the right to edit and the workspace's AI key.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        slide: {
+          type: 'integer',
+          minimum: 1,
+          description: 'The slide it starts at (1 = the first).',
+        },
+        instruction: { type: 'string', minLength: 1, maxLength: 4000 },
+      },
+      required: ['presentation', 'slide', 'instruction'],
+    },
+    annotations: { destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'undo_edit',
+    title: 'Undo a change of Slider’s AI',
+    description:
+      "Takes back a change Slider's AI made to the slides – one of edit_slides, or one asked for in a comment in Slider; `edit`: its id, as edit_slides and list_comments name it. `redo`: true puts a change taken back in again. Its thread opens again when it is taken back. Needs the right to edit.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        edit: { type: 'string', description: 'The id of the change (edit …).' },
+        redo: { type: 'boolean', description: 'Put it in again (default false: take it back).' },
+      },
+      required: ['presentation', 'edit'],
+    },
+    annotations: { destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'list_materials',
+    title: "List a presentation's material",
+    description:
+      "Everything in a presentation's material: files with id, kind, size, pages or sheets and the start of their text; notes, links and folders with their id and text. Items marked „yours“ the person may change.",
+    inputSchema: {
+      type: 'object',
+      properties: presentationProperty,
+      required: ['presentation'],
+    },
+    annotations: read,
+  },
+  ...materialTools,
+  {
+    name: 'add_note',
+    title: 'Add a note to the material',
+    description:
+      "Adds a note with `text` (Markdown: headings, **bold**, lists, links) to the presentation's material. With `attach_to` (a file's or link's id) it is a note about that thing. Up to 10 000 characters – one finding or summary per note, with its sources.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        text: { type: 'string', minLength: 1, maxLength: MAX_BOARD_NOTE_LENGTH },
+        attach_to: { type: 'string', description: 'Id of a file or link in the material.' },
+      },
+      required: ['presentation', 'text'],
+    },
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'add_link',
+    title: 'Add a link to the material',
+    description:
+      "Adds a web address (http/https) to the presentation's material, with an optional title.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        url: { type: 'string' },
+        title: { type: 'string', maxLength: 300 },
+      },
+      required: ['presentation', 'url'],
+    },
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'add_file',
+    title: 'Add a file to the material',
+    description:
+      "Adds a file to the presentation's material – Slider reads its text for everyone's AI. Give exactly one of `text` (a text or Markdown file you write, e.g. research notes, a table as CSV) or `base64` (the file's bytes: PDF, Word, PowerPoint, Excel, pictures …). Slider downloads nothing itself – a web page goes in with add_link. `name` with its extension decides the kind.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        name: { type: 'string', description: 'File name with extension, e.g. "Marktstudie.pdf".' },
+        text: { type: 'string' },
+        base64: { type: 'string' },
+      },
+      required: ['presentation', 'name'],
+    },
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'update_note',
+    title: 'Change a note',
+    description:
+      "Replaces the text (Markdown) of one of the person's own notes in the material, or a link's title.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        item: { type: 'string', description: 'Its id (list_materials).' },
+        text: { type: 'string', maxLength: MAX_BOARD_NOTE_LENGTH },
+      },
+      required: ['presentation', 'item', 'text'],
+    },
+    annotations: { idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'delete_item',
+    title: 'Delete from the material',
+    description:
+      "Deletes a file, note or link from the material – the person's own (or anyone's where they manage the presentation). Cannot be undone.",
+    inputSchema: {
+      type: 'object',
+      properties: { ...presentationProperty, item: { type: 'string' } },
+      required: ['presentation', 'item'],
+    },
+    annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'create_presentation',
+    title: 'Create a presentation',
+    description:
+      "Makes a new, empty presentation (one blank slide) and returns its id and link. `template`: a template of the workspace (list_workspaces) for its look. It lies in the person's own files („Meine Dateien“), only they see it there – unless `folder` or `area` says where in the workspace's files it is to lie. Put material into it next (add_file, add_note, add_link), then build_presentation lets Slider's AI build it.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', maxLength: 200 },
+        workspace: { type: 'string', description: 'Id or name; default: the first.' },
+        template: { type: 'string', description: 'Id of a template of that workspace.' },
+        folder: { type: 'string', description: 'A folder id of the files: it lies in there.' },
+        area: { type: 'string', description: 'An area id of the files: it lies at its top.' },
+      },
+    },
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'build_presentation',
+    title: 'Build it with Slider’s AI',
+    description: `Slider's AI builds the slides of a presentation that is still empty (create_presentation) from its material and \`description\` – what it is about, for whom, what it should achieve, what must be in it. \`kind\`: ${DECK_KINDS.map((kind) => `${kind.id} (${kind.meaning})`).join(', ')}. \`pages\`: ${MIN_CREATED_SLIDES}–${MAX_CREATED_SLIDES} slides. Runs a few minutes in the background with the workspace's AI key; get_presentation shows its progress.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        description: { type: 'string', minLength: 1, maxLength: 8000 },
+        kind: { type: 'string', enum: DECK_KINDS.map((kind) => kind.id) },
+        pages: { type: 'integer', minimum: MIN_CREATED_SLIDES, maximum: MAX_CREATED_SLIDES },
+      },
+      required: ['presentation', 'description'],
+    },
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'update_presentation',
+    title: 'Rename or archive a presentation',
+    description:
+      'Renames a presentation (`title`) or archives it and brings it back (`archived`). Needs the right to manage it. Where it lies – a folder or an area of the files – is said by moving it there (move_files in an app, move in Cloud), with its presentation id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        title: { type: 'string', maxLength: 200 },
+        archived: { type: 'boolean' },
+      },
+      required: ['presentation'],
+    },
+    annotations: { idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'set_access',
+    title: 'Who may open a presentation',
+    description:
+      "Who may open a presentation. Without `restricted` and `people` it only tells. `restricted`: true – only the people in `people` open it, besides its owner and the workspace's admins; false – everyone in the workspace. `people`: names, email addresses or ids of members of its workspace; it replaces the list (kept while not restricted). Answers who has access and who is in the workspace. Needs the right to manage it.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        restricted: { type: 'boolean' },
+        people: { type: 'array', items: { type: 'string' }, maxItems: 100 },
+      },
+      required: ['presentation'],
+    },
+    annotations: { idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'download_presentation',
+    title: 'Download a presentation',
+    description:
+      'Hands over a presentation as a file, as it is now: `format` pdf (default; with `slide` only that slide), odp (the presentation file itself – PowerPoint, Keynote and LibreOffice open it) or png (one `slide` as a picture). The file comes attached (up to 10 MB), with a link the person opens in a browser where they are signed in to Office. Needs the right to edit.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...presentationProperty,
+        format: { type: 'string', enum: ['pdf', 'odp', 'png'] },
+        slide: { type: 'integer', minimum: 1, description: 'Only this slide (pdf, png).' },
+      },
+      required: ['presentation'],
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'delete_presentation',
+    title: 'Delete a presentation',
+    description:
+      'Deletes a presentation for everyone – its slides, comments and material. Cannot be undone; archive it with update_presentation instead unless the person asked to delete exactly this one. Needs the right to manage it.',
+    inputSchema: {
+      type: 'object',
+      properties: presentationProperty,
+      required: ['presentation'],
+    },
+    annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
+];
+
+const TOOL_NAMES = new Set(MCP_TOOLS.map((tool) => tool.name));
+
+/** A mistake the AI can fix by calling again – told as the tool's error. */
+export class McpToolError extends Error {}
+const ToolError = McpToolError;
+
+const text = (value: string): McpToolResult => ({ content: [{ type: 'text', text: value }] });
+
+/** A window of the page's own (`aiLimits`): one budget whether asked in Slider or by an app. */
+function withinLimit(hit: { allowed: boolean; retryAfterS: number }, what: string) {
+  if (!hit.allowed)
+    throw new ToolError(`Too many ${what} at once – try again in ${hit.retryAfterS} s.`);
+}
+
+export const deckLink = (deps: AppDeps, deckId: string, suffix = '') =>
+  `${deps.config.webOrigin}/d/${deckId}${suffix}`;
+
+// ── Who may see what ───────────────────────────────────────────────────────
+
+/** The caller's workspaces and roles – only the connection's workspace when it is held to one. */
+async function accessOf(deps: AppDeps, caller: McpCaller): Promise<DeckViewerAccess> {
+  const roles = await rolesOf(deps.db, caller.viewer.author.id);
+  if (caller.workspaceId)
+    for (const id of [...roles.keys()]) if (id !== caller.workspaceId) roles.delete(id);
+  return { kind: 'user', userId: caller.viewer.author.id, roles };
+}
+
+/** The caller's workspaces – not blocked ones (BER-167), only the connection's when held to one. */
+async function workspacesOf(deps: AppDeps, caller: McpCaller) {
+  const all = await listWorkspaces(deps, caller.viewer.author.id);
+  return all.filter(
+    (each) => !each.blocked && (!caller.workspaceId || each.id === caller.workspaceId),
+  );
+}
+
+export async function findWorkspace(deps: AppDeps, caller: McpCaller, wanted: string | undefined) {
+  const mine = await workspacesOf(deps, caller);
+  if (!wanted) {
+    if (!mine[0]) throw new ToolError('The person has no workspace Office lets this app into.');
+    return mine[0];
+  }
+  const key = wanted.trim();
+  const found =
+    mine.find((each) => each.id === key) ??
+    mine.find((each) => searchFold(each.name) === searchFold(key));
+  if (!found)
+    throw new ToolError(
+      `No workspace "${key}". The person's: ${mine.map((each) => `${each.name} (${each.id})`).join(', ') || 'none'}.`,
+    );
+  return found;
+}
+
+const DECK_LINK = /\/d\/([A-Za-z0-9-]{8,})/;
+
+/** The presentation named – by id, link or exact title – checked for the right and workspace. */
+export async function findDeck(
+  deps: AppDeps,
+  caller: McpCaller,
+  wanted: unknown,
+  right: 'view' | 'comment' | 'own' = 'view',
+): Promise<DeckRow> {
+  if (typeof wanted !== 'string' || !wanted.trim())
+    throw new ToolError('Name the presentation (`presentation`: its id from list_presentations).');
+  const key = wanted.trim();
+  if (key.length > 300) throw new ToolError('Name the presentation by its id or its exact title.');
+  let id = DECK_LINK.exec(key)?.[1] ?? key;
+  const [byId] = await deps.db.select({ id: decks.id }).from(decks).where(eq(decks.id, id));
+  if (!byId) {
+    // Only the caller's workspaces (the connection's one): titles elsewhere are none of theirs.
+    const access = await accessOf(deps, caller);
+    const workspaceIds = [...access.roles.keys()];
+    const rows =
+      workspaceIds.length === 0
+        ? []
+        : await deps.db
+            .select({
+              id: decks.id,
+              title: decks.title,
+              updatedAt: decks.updatedAt,
+              archivedAt: decks.archivedAt,
+            })
+            .from(decks)
+            .where(
+              and(
+                inArray(decks.workspaceId, workspaceIds),
+                openToViewer(access),
+                eq(decks.isTemplate, false),
+              ),
+            );
+    const matches = rows.filter((row) => searchFold(row.title) === searchFold(key));
+    if (matches.length === 0)
+      throw new ToolError(`No presentation "${key}" – list_presentations finds it.`);
+    if (matches.length > 1)
+      throw new ToolError(
+        `${matches.length} presentations are called "${key}" – name one by its id: ${matches
+          .map(
+            (row) =>
+              `${row.id} (changed ${new Date(row.updatedAt).toISOString().slice(0, 16).replace('T', ' ')}${row.archivedAt ? ', archived' : ''})`,
+          )
+          .join(', ')}. get_presentation shows each; ask the person if unsure.`,
+      );
+    id = matches[0]!.id;
+  }
+  const missing = () => new ToolError(`No presentation "${key}" – list_presentations finds it.`);
+  const open = (needed: typeof right) =>
+    requireDeckAccess(deps, caller.viewer, id, needed).catch((error: unknown) => {
+      // Not there and not theirs read the same.
+      if (error instanceof ApiError && error.status === 404) throw missing();
+      throw error;
+    });
+  // Where it lies comes before what the person may do with it: an app let into one workspace
+  // learns nothing of the others – not that a presentation there may not be changed, nor that
+  // its workspace is blocked.
+  if (caller.workspaceId) {
+    const [where] = await deps.db
+      .select({ workspaceId: decks.workspaceId })
+      .from(decks)
+      .where(eq(decks.id, id));
+    if (where?.workspaceId !== caller.workspaceId) throw missing();
+  }
+  const deck = await open(right);
+  if (caller.workspaceId && deck.workspaceId !== caller.workspaceId) throw missing();
+  return deck;
+}
+
+// ── Reading ────────────────────────────────────────────────────────────────
+
+async function listWorkspacesTool(deps: AppDeps, caller: McpCaller): Promise<McpToolResult> {
+  const mine = await workspacesOf(deps, caller);
+  if (mine.length === 0) return text('No workspace.');
+  const lines = await Promise.all(
+    mine.map(async (workspace) => {
+      const masters = await listWorkspaceMasters(deps, caller.viewer.author.id, workspace.id).catch(
+        () => [],
+      );
+      const templates = masters
+        .filter((master) => !master.draftDeckId)
+        .map((master) => `  - template ${master.id}: „${master.name}“ (${master.format})`);
+      return [
+        `- ${workspace.name} (id ${workspace.id}) – role ${workspace.role}${workspace.locked ? ', locked (read only)' : ''}`,
+        ...templates,
+      ].join('\n');
+    }),
+  );
+  return text(lines.join('\n'));
+}
+
+const listInput = z.object({
+  query: z.string().max(200).optional(),
+  workspace: z.string().optional(),
+  archived: z.boolean().optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+});
+
+function deckLine(deps: AppDeps, deck: Deck, workspaceName: string | undefined) {
+  const facts = [
+    workspaceName ? `workspace ${workspaceName}` : null,
+    `${deck.slideCount} slides`,
+    deck.openCommentCount > 0 ? `${deck.openCommentCount} open comments` : null,
+    `by ${deck.owner.name}`,
+    `changed ${deck.updatedAt.slice(0, 10)}`,
+    deck.archivedAt ? 'archived' : null,
+    deck.import.status === 'failed'
+      ? 'could not be read'
+      : deck.import.status !== 'ready'
+        ? 'still being read'
+        : null,
+  ].filter(Boolean);
+  return `- ${deck.id}: „${deck.title}“ (${facts.join(', ')}) ${deckLink(deps, deck.id)}`;
+}
+
+async function listPresentations(
+  deps: AppDeps,
+  caller: McpCaller,
+  input: z.infer<typeof listInput>,
+): Promise<McpToolResult> {
+  const workspaces = input.workspace
+    ? [await findWorkspace(deps, caller, input.workspace)]
+    : await workspacesOf(deps, caller);
+  const names = new Map(workspaces.map((each) => [each.id, each.name]));
+  const ids = workspaces.map((each) => each.id);
+  const access = await accessOf(deps, caller);
+  let all = await listWorkspaceDecks(deps, ids, access);
+  if (!input.archived) all = all.filter((deck) => !deck.archivedAt);
+  const limit = input.limit ?? 30;
+  const query = input.query?.trim();
+  if (!query) {
+    if (all.length === 0) return text('No presentations.');
+    const shown = all.slice(0, limit);
+    return text(
+      `${all.length} presentation(s)${all.length > shown.length ? `, the ${shown.length} changed last` : ''}:\n${shown.map((deck) => deckLine(deps, deck, names.get(deck.workspaceId))).join('\n')}`,
+    );
+  }
+  withinLimit(aiLimits(deps).searches.hit(caller.viewer.author.id), 'searches');
+  const needle = searchFold(query);
+  const found = await searchDecks(deps, ids, access, query);
+  const hitsOf = new Map(found.map((result) => [result.deckId, result]));
+  const matching = all.filter(
+    (deck) => searchFold(deck.title).includes(needle) || hitsOf.has(deck.id),
+  );
+  if (matching.length === 0) return text(`No presentation with "${query}".`);
+  const lines = matching.slice(0, limit).map((deck) => {
+    const hits = hitsOf.get(deck.id);
+    const places = (hits?.hits ?? []).map(
+      (hit) =>
+        `\n    ${hit.kind === 'slide' ? `slide ${hit.slideNumber ?? '?'}` : `comment by ${hit.author ?? '?'}${hit.slideNumber ? ` on slide ${hit.slideNumber}` : ''}`}: …${hit.snippet}…`,
+    );
+    const more =
+      hits && hits.hitCount > places.length ? `\n    (${hits.hitCount} places in all)` : '';
+    return deckLine(deps, deck, names.get(deck.workspaceId)) + places.join('') + more;
+  });
+  return text(`${matching.length} presentation(s) with "${query}":\n${lines.join('\n')}`);
+}
+
+// ── search / fetch (the pair ChatGPT's research and company knowledge use) ──
+
+const searchInput = z.object({ query: z.string().trim().min(1).max(200) });
+const fetchInput = z.object({ id: z.string().trim().min(1).max(200) });
+const SEARCH_RESULTS = 20;
+const FETCH_CHARS = 100_000;
+
+interface Found {
+  score: number;
+  id: string;
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+/**
+ * Everything at once. The text of slides, comments and files is encrypted at rest, so it is
+ * read and compared in the server, not in SQL – counted in the page's search window.
+ */
+async function searchEverything(
+  deps: AppDeps,
+  caller: McpCaller,
+  query: string,
+): Promise<McpToolResult> {
+  withinLimit(aiLimits(deps).searches.hit(caller.viewer.author.id), 'searches');
+  const words = [...new Set(searchFold(query).split(/\s+/).filter(Boolean))];
+  const workspaces = await workspacesOf(deps, caller);
+  const ids = workspaces.map((each) => each.id);
+  const access = await accessOf(deps, caller);
+  const all = (await listWorkspaceDecks(deps, ids, access)).filter((deck) => !deck.archivedAt);
+  const titleOf = new Map(all.map((deck) => [deck.id, deck.title]));
+  const workspaceOf = new Map(workspaces.map((each) => [each.id, each.name]));
+  const results: Found[] = [];
+
+  // Slides and comments: the words together, and each word apart (places with most of them first).
+  const asked =
+    words.length > 1
+      ? [query, ...words.filter((word) => word.length >= DECK_SEARCH_MIN_LENGTH).slice(0, 8)]
+      : [query];
+  const searched = await Promise.all(asked.map((each) => searchDecks(deps, ids, access, each)));
+  const phrase = new Map(
+    words.length > 1 ? searched[0]!.map((result) => [result.deckId, result]) : [],
+  );
+  const perWord = new Map<string, { words: number; places: number; hit?: DeckSearchHit }>();
+  for (const results of words.length > 1 ? searched.slice(1) : searched)
+    for (const result of results) {
+      const before = perWord.get(result.deckId) ?? { words: 0, places: 0 };
+      perWord.set(result.deckId, {
+        words: before.words + 1,
+        places: before.places + result.hitCount,
+        hit: before.hit ?? result.hits[0],
+      });
+    }
+  for (const deck of all) {
+    const inTitle = matchOf(deck.title, words);
+    const together = phrase.get(deck.id);
+    const apart = perWord.get(deck.id);
+    if (!inTitle && !together && !apart) continue;
+    const hit = together?.hits[0] ?? apart?.hit;
+    const inText = together
+      ? (words.length + 1) * 1000 + Math.min(together.hitCount, 999)
+      : apart
+        ? apart.words * 1000 + Math.min(apart.places, 999)
+        : 0;
+    results.push({
+      // A title naming the words weighs most; then text on slides and in comments.
+      score: Math.max(inTitle ? inTitle.score + 1500 : 0, inText),
+      id: `presentation:${deck.id}`,
+      title: deck.title,
+      url: deckLink(deps, deck.id),
+      // Which one it is (titles repeat), then where the words are.
+      snippet: `Presentation in ${workspaceOf.get(deck.workspaceId) ?? '?'}, ${deck.slideCount} slides, changed ${deck.updatedAt.slice(0, 10)}${
+        hit
+          ? ` – ${hit.kind === 'slide' ? `slide ${hit.slideNumber ?? '?'}` : `comment by ${hit.author ?? '?'}`}: …${hit.snippet}…`
+          : ''
+      }`,
+    });
+  }
+
+  const deckIds = all.map((deck) => deck.id);
+  if (deckIds.length > 0) {
+    const [files, chunks, items] = await Promise.all([
+      deps.db
+        .select({ id: deckMaterials.id, name: deckMaterials.name, deckId: deckMaterials.deckId })
+        .from(deckMaterials)
+        .where(inArray(deckMaterials.deckId, deckIds)),
+      deps.db
+        .select({
+          materialId: materialChunks.materialId,
+          page: materialChunks.page,
+          sheet: materialChunks.sheet,
+          text: materialChunks.text,
+        })
+        .from(materialChunks)
+        .where(inArray(materialChunks.deckId, deckIds)),
+      deps.db
+        .select({
+          id: deckBoardItems.id,
+          deckId: deckBoardItems.deckId,
+          kind: deckBoardItems.kind,
+          text: deckBoardItems.text,
+          url: deckBoardItems.url,
+        })
+        .from(deckBoardItems)
+        .where(inArray(deckBoardItems.deckId, deckIds)),
+    ]);
+    const best = new Map<string, { score: number; snippet: string; where: string }>();
+    for (const chunk of chunks) {
+      const match = matchOf(chunk.text, words);
+      if (!match) continue;
+      const before = best.get(chunk.materialId);
+      if (before && before.score >= match.score) continue;
+      best.set(chunk.materialId, {
+        ...match,
+        where: chunk.page ? `page ${chunk.page}` : chunk.sheet ? `sheet „${chunk.sheet}“` : '',
+      });
+    }
+    for (const file of files) {
+      const inName = matchOf(file.name, words);
+      const inText = best.get(file.id);
+      if (!file.deckId || (!inName && !inText)) continue;
+      const on = `in the material of „${titleOf.get(file.deckId) ?? '?'}“`;
+      results.push({
+        score: Math.max(inName ? inName.score + 500 : 0, inText?.score ?? 0),
+        id: `file:${file.id}`,
+        title: file.name,
+        url: deckLink(deps, file.deckId),
+        snippet: inText
+          ? `File ${on}${inText.where ? `, ${inText.where}` : ''}: ${inText.snippet}`
+          : `File ${on}`,
+      });
+    }
+    for (const item of items) {
+      if (item.kind === 'folder' || !item.deckId) continue;
+      const match = matchOf(`${item.text} ${item.url ?? ''}`, words);
+      if (!match) continue;
+      const label = item.kind === 'link' ? 'Link' : item.kind === 'question' ? 'Question' : 'Note';
+      results.push({
+        score: match.score,
+        id: `note:${item.id}`,
+        title: `${label}: ${(item.text.split('\n')[0] ?? '').replace(/^#+\s*/, '').slice(0, 80) || item.url || label}`,
+        url: item.kind === 'link' && item.url ? item.url : deckLink(deps, item.deckId),
+        snippet: `${label} in the material of „${titleOf.get(item.deckId) ?? '?'}“: ${match.snippet}`,
+      });
+    }
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  return text(
+    JSON.stringify({
+      results: results.slice(0, SEARCH_RESULTS).map(({ score: _score, ...result }) => result),
+    }),
+  );
+}
+
+async function fetchResult(deps: AppDeps, caller: McpCaller, id: string): Promise<McpToolResult> {
+  const [kind, key] = /^(presentation|file|note):(.+)$/.exec(id)?.slice(1) ?? ['presentation', id];
+  const answer = (value: {
+    id: string;
+    title: string;
+    text: string;
+    url: string;
+    metadata: Record<string, string>;
+  }) => text(JSON.stringify(value));
+
+  if (kind === 'file') {
+    const [file] = await deps.db.select().from(deckMaterials).where(eq(deckMaterials.id, key!));
+    // A text document's board is not reached from here: its files are told as not there.
+    if (!file?.deckId) throw new ToolError(`No file "${key}".`);
+    // One the person may not see is told as one that is not there.
+    const deck = await findDeck(deps, caller, file.deckId).catch(() => {
+      throw new ToolError(`No file "${key}".`);
+    });
+    const chunks = await deps.db
+      .select({ page: materialChunks.page, sheet: materialChunks.sheet, text: materialChunks.text })
+      .from(materialChunks)
+      .where(eq(materialChunks.materialId, file.id))
+      .orderBy(asc(materialChunks.seq));
+    let body = '';
+    let page: number | null = null;
+    let sheet: string | null = null;
+    for (const chunk of chunks) {
+      if (chunk.page && chunk.page !== page) body += `\n\n[page ${chunk.page}]\n`;
+      else if (chunk.sheet && chunk.sheet !== sheet) body += `\n\n[sheet „${chunk.sheet}“]\n`;
+      else if (body) body += '\n';
+      page = chunk.page;
+      sheet = chunk.sheet;
+      body += chunk.text;
+      if (body.length > FETCH_CHARS) break;
+    }
+    body = body.trim();
+    if (body.length > FETCH_CHARS)
+      body = `${body.slice(0, FETCH_CHARS)}\n[… more – read_material reads on from a page.]`;
+    return answer({
+      id,
+      title: file.name,
+      text:
+        body ||
+        (file.readState === 'pending'
+          ? 'This file is still being read – try again shortly.'
+          : 'This file has no readable text (view_material shows it).'),
+      url: deckLink(deps, deck.id),
+      metadata: {
+        presentation: deck.title,
+        presentation_id: deck.id,
+        file_id: file.id,
+        kind: file.kind,
+        ...(file.pages ? { pages: String(file.pages) } : {}),
+      },
+    });
+  }
+
+  if (kind === 'note') {
+    const [item] = await deps.db.select().from(deckBoardItems).where(eq(deckBoardItems.id, key!));
+    if (!item?.deckId) throw new ToolError(`No note "${key}".`);
+    const deck = await findDeck(deps, caller, item.deckId).catch(() => {
+      throw new ToolError(`No note "${key}".`);
+    });
+    return answer({
+      id,
+      title: (item.text.split('\n')[0] ?? '').replace(/^#+\s*/, '').slice(0, 80) || item.kind,
+      text: [item.text, item.url].filter(Boolean).join('\n\n'),
+      url: deckLink(deps, deck.id),
+      metadata: {
+        presentation: deck.title,
+        presentation_id: deck.id,
+        kind: item.kind,
+        item_id: item.id,
+      },
+    });
+  }
+
+  const deck = await findDeck(deps, caller, key);
+  const outline = await getPresentation(deps, caller, deck.id);
+  return answer({
+    id: `presentation:${deck.id}`,
+    title: deck.title,
+    text: outline.content[0]?.type === 'text' ? outline.content[0].text : '',
+    url: deckLink(deps, deck.id),
+    metadata: { presentation_id: deck.id },
+  });
+}
+
+/** The slides people see, numbered as Slider numbers them (variants made in the editor apart). */
+export async function slidesOf(deps: AppDeps, deck: DeckRow): Promise<Slide[]> {
+  return (await listSlides(deps.db, deck)).filter((slide) => !slide.variantOf);
+}
+
+const slideText = (slide: Slide) =>
+  slide.shapes
+    .map((shape) =>
+      shape.text
+        ?.split('\n')
+        .map((line) => line.trimEnd())
+        .filter(Boolean)
+        .join('\n')
+        .trim(),
+    )
+    .filter((each): each is string => !!each)
+    .join('\n');
+
+/** Characters of slide text get_presentation gives in all, and per slide. */
+const OUTLINE_CHARS = 60_000;
+const SLIDE_CHARS = 2_500;
+
+async function getPresentation(
+  deps: AppDeps,
+  caller: McpCaller,
+  wanted: unknown,
+): Promise<McpToolResult> {
+  const row = await findDeck(deps, caller, wanted);
+  const access = await accessOf(deps, caller);
+  const [deck, slides, materials, items, creation, workspaces] = await Promise.all([
+    toDeckDto(deps.db, row, { access }),
+    slidesOf(deps, row),
+    materialsOf(deps, deckBoard(row.id)),
+    deps.db.select().from(deckBoardItems).where(eq(deckBoardItems.deckId, row.id)),
+    getCreation(deps, caller.viewer, row.id),
+    workspacesOf(deps, caller),
+  ]);
+  const may = deck.permissions.canManage
+    ? 'manage it (and comment, add material)'
+    : deck.permissions.canComment
+      ? 'comment and add material'
+      : 'only look';
+  const out = [
+    `„${deck.title}“ (id ${deck.id})`,
+    `Workspace: ${workspaces.find((each) => each.id === deck.workspaceId)?.name ?? deck.workspaceId} · by ${deck.owner.name} · changed ${deck.updatedAt.slice(0, 16).replace('T', ' ')} · version ${deck.revisionNumber}`,
+    `Open in Slider: ${deckLink(deps, deck.id)}`,
+    `The person may ${may}.`,
+  ];
+  if (deck.import.status === 'queued' || deck.import.status === 'running')
+    out.push('Its file is still being read – slides follow shortly.');
+  if (deck.import.status === 'failed') out.push(`Its file could not be read: ${deck.import.error}`);
+  if (creation && creation.status === 'running')
+    out.push(
+      `Slider's AI is building it: ${creation.built}${creation.pages ? ` of ${creation.pages}` : ''} slides built${creation.step ? ` – ${creation.step}` : ''}.`,
+    );
+  else if (creation?.status === 'failed')
+    out.push(`Slider's AI stopped: ${creation.error ?? 'failed'}.`);
+  else if (creation?.prompt)
+    out.push("It is still empty – build_presentation lets Slider's AI build it from its material.");
+
+  if (deck.permissions.canManage && !creation?.prompt) {
+    const reason = blocker(deps, row, await currentRevision(deps.db, row));
+    out.push(
+      reason
+        ? `Slider's AI cannot change its slides now (edit_slides): ${reason}`
+        : "Slider's AI can change its slides (edit_slides).",
+    );
+  }
+
+  out.push('', `Slides (${slides.length}):`);
+  let budget = OUTLINE_CHARS;
+  for (const [index, slide] of slides.entries()) {
+    // The title is the head already – not again as the first line of the text.
+    const lines = slideText(slide).split('\n');
+    if (slide.title && lines[0]?.trim() === slide.title.trim()) lines.shift();
+    const body = lines.join('\n').trim();
+    const marks = [
+      slide.hidden ? 'hidden' : null,
+      slide.openCommentCount > 0 ? `${slide.openCommentCount} open comment(s)` : null,
+    ].filter(Boolean);
+    const head = `${index + 1}. ${slide.title?.trim() || '(no title)'}${marks.length ? ` [${marks.join(', ')}]` : ''}`;
+    if (budget <= 0) {
+      out.push(head);
+      continue;
+    }
+    const shown = body.length > SLIDE_CHARS ? `${body.slice(0, SLIDE_CHARS)} […]` : body;
+    const block = shown ? `${head}\n   ${shown.replace(/\n/g, '\n   ')}` : head;
+    budget -= block.length;
+    out.push(block);
+  }
+  if (budget <= 0) out.push('[More text than fits – view_slide reads a slide in full.]');
+
+  out.push('', 'Board (Material):');
+  const notes = items.filter((item) => item.kind !== 'folder');
+  if (materials.length === 0 && notes.length === 0) out.push('empty');
+  else {
+    for (const material of materials) out.push(`- ${describeMaterial(material)}`);
+    if (notes.length > 0)
+      out.push(`- and ${notes.length} note(s) or link(s) – list_materials lists them`);
+  }
+  return text(out.join('\n'));
+}
+
+const slideInput = z.object({ slide: z.number().int().min(1) });
+
+async function slideAt(deps: AppDeps, deck: DeckRow, number: number) {
+  const slides = await slidesOf(deps, deck);
+  const slide = slides[number - 1];
+  if (!slide)
+    throw new ToolError(
+      slides.length === 0
+        ? 'The presentation has no slides yet.'
+        : `There is no slide ${number} – it has ${slides.length}.`,
+    );
+  return slide;
+}
+
+/** What a comment says beside its words: its voice memo or video as heard, pictures, a drawing. */
+const commentExtras = (comment: Comment) => {
+  const parts: string[] = [];
+  const memo = comment.media;
+  if (memo) {
+    const whole = Math.round(memo.durationMs / 1000);
+    const said =
+      memo.transcript === null
+        ? memo.transcriptStatus === 'none' || memo.transcriptStatus === 'failed'
+          ? 'not transcribed'
+          : 'not transcribed yet'
+        : memo.transcript.trim()
+          ? `said: ${memo.transcript.trim()}`
+          : 'nothing said';
+    parts.push(
+      `(${memo.kind === 'video' ? 'video' : 'voice memo'}, ${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}, ${said})`,
+    );
+  }
+  const pictures = comment.images?.length ?? 0;
+  if (pictures > 0) parts.push(pictures === 1 ? '(a picture)' : `(${pictures} pictures)`);
+  // A sticker (a text stroke) is words, not a drawing: `commentWords` reads it.
+  if (comment.strokes.some(isPathStroke)) parts.push('(drawn on the slide)');
+  return parts;
+};
+
+/** A comment as a line of `list_comments`: who, when, done – its words, memo, pictures, drawing. */
+export const commentLine = (comment: Comment, indent = '') =>
+  `${indent}- ${comment.id} ${comment.author.name}, ${comment.createdAt.slice(0, 16).replace('T', ' ')}${comment.status === 'done' ? ' (done)' : ''}: ${[commentWords(comment), ...commentExtras(comment)].filter(Boolean).join(' ') || '(empty)'}`;
+
+async function viewSlide(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await findDeck(deps, caller, args.presentation);
+  const { slide: number } = slideInput.parse(args);
+  const slide = await slideAt(deps, deck, number);
+  const [version] = await deps.db
+    .select({ imageKey: slideVersions.imageKey })
+    .from(slideVersions)
+    .where(
+      and(
+        eq(slideVersions.revisionId, deck.currentRevisionId!),
+        eq(slideVersions.slideId, slide.id),
+      ),
+    );
+  const content: McpContent[] = [];
+  const bytes = version ? await deps.storage.get(version.imageKey) : null;
+  if (bytes) {
+    try {
+      content.push({
+        type: 'image',
+        data: Buffer.from(await asJpeg(bytes)).toString('base64'),
+        mimeType: 'image/jpeg',
+      });
+    } catch {
+      // A picture the canvas cannot draw – the text tells the rest.
+    }
+  }
+  const comments = (await listComments(deps, caller.viewer, deck.id)).filter(
+    (comment) => comment.slideId === slide.id,
+  );
+  const roots = comments.filter((comment) => !comment.parentId);
+  const body = slideText(slide);
+  const parts = [
+    `Slide ${number}: ${slide.title?.trim() || '(no title)'}${slide.hidden ? ' (hidden)' : ''} – ${deckLink(deps, deck.id, `?slide=${encodeURIComponent(slide.id)}`)}`,
+    body ? `Text:\n${body}` : 'No text.',
+  ];
+  if (!content.length) parts.push('(No picture of this slide.)');
+  if (roots.length > 0)
+    parts.push(
+      `Comments:\n${roots
+        .map((root) =>
+          [
+            commentLine(root),
+            ...comments
+              .filter((reply) => reply.parentId === root.id)
+              .map((reply) => commentLine(reply, '  ')),
+          ].join('\n'),
+        )
+        .join('\n')}`,
+    );
+  content.unshift({ type: 'text', text: parts.join('\n\n') });
+  return { content };
+}
+
+const commentsInput = z.object({
+  slide: z.number().int().min(1).optional(),
+  done: z.boolean().optional(),
+});
+
+async function listCommentsTool(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await findDeck(deps, caller, args.presentation);
+  const input = commentsInput.parse(args);
+  const [all, slides, proposals] = await Promise.all([
+    listComments(deps, caller.viewer, deck.id),
+    slidesOf(deps, deck),
+    listProposals(deps, caller.viewer, deck.id),
+  ]);
+  // What Slider's AI answered to a comment that asked it, right after that comment.
+  const answers = (comment: Comment, indent: string) =>
+    proposals
+      .filter((proposal) => proposal.commentId === comment.id)
+      .map(
+        (proposal) => `${indent}  - Slider's AI (edit ${proposal.id}) ${proposalLine(proposal)}`,
+      );
+  const numberOf = new Map(slides.map((slide, index) => [slide.id, index + 1]));
+  const only = input.slide ? (await slideAt(deps, deck, input.slide)).id : null;
+  const roots = all.filter(
+    (comment) =>
+      !comment.parentId &&
+      (input.done || comment.status === 'open') &&
+      (!only || comment.slideId === only),
+  );
+  if (roots.length === 0) return text(input.done ? 'No comments.' : 'No open comments.');
+  const lines = roots.map((root) => {
+    const where = root.slideId
+      ? numberOf.has(root.slideId)
+        ? `slide ${numberOf.get(root.slideId)}`
+        : 'a slide no longer in the deck'
+      : 'the whole presentation';
+    return [
+      `On ${where}:`,
+      commentLine(root, '  '),
+      ...answers(root, '  '),
+      ...all
+        .filter((reply) => reply.parentId === root.id)
+        .flatMap((reply) => [commentLine(reply, '    '), ...answers(reply, '    ')]),
+    ].join('\n');
+  });
+  return text(`${roots.length} thread(s):\n${lines.join('\n')}`);
+}
+
+async function listMaterialsTool(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await findDeck(deps, caller, args.presentation);
+  const [materials, items] = await Promise.all([
+    materialsOf(deps, deckBoard(deck.id)),
+    deps.db.select().from(deckBoardItems).where(eq(deckBoardItems.deckId, deck.id)),
+  ]);
+  if (materials.length === 0 && items.length === 0)
+    return text(`The material is empty. ${deckLink(deps, deck.id)}`);
+  const me = caller.viewer.author.id;
+  const yours = (author: { id: string }) => (author.id === me ? ', yours' : '');
+  const nameOf = new Map<string, string>([
+    ...materials.map((row) => [row.id, `„${row.name}“`] as const),
+    ...items.map(
+      (item) =>
+        [
+          item.id,
+          item.kind === 'link' ? (item.url ?? item.text) : `„${item.text.slice(0, 40)}“`,
+        ] as const,
+    ),
+  ]);
+  const lines: string[] = [];
+  for (const row of materials) {
+    const summary = row.summary?.replace(/\s+/g, ' ').trim();
+    lines.push(
+      `- file ${describeMaterial(row)}, by ${row.author.name}${yours(row.author)}${summary ? `\n  ${summary.slice(0, 600)}` : ''}`,
+    );
+  }
+  for (const item of items) {
+    const on = item.boundIds.map((id) => nameOf.get(id) ?? id);
+    const body = item.text.trim().slice(0, 1500);
+    if (item.kind === 'link')
+      lines.push(
+        `- link ${item.id}: ${item.url}${body ? ` „${body}“` : ''} (by ${item.author.name}${yours(item.author)})`,
+      );
+    else if (item.kind === 'folder')
+      lines.push(
+        `- folder ${item.id}: „${item.text}“ with ${on.join(', ') || 'nothing'} (by ${item.author.name})`,
+      );
+    else if (item.kind === 'question')
+      lines.push(
+        `- question to the AI ${item.id} (by ${item.author.name}${yours(item.author)}): ${body}`,
+      );
+    else if (item.kind === 'note')
+      lines.push(
+        `- note ${item.id} on ${on.join(', ')} (by ${item.author.name}${yours(item.author)}): ${body}`,
+      );
+    else
+      lines.push(
+        `- note ${item.id} (by ${item.author.name}${yours(item.author)})${on.length ? ` holding ${on.join(', ')}` : ''}: ${body}`,
+      );
+  }
+  return text(`Material of „${deck.title}“ – ${deckLink(deps, deck.id)}\n${lines.join('\n')}`);
+}
+
+/** The board tools Slider's AI uses, run for the presentation named. */
+async function materialTool(
+  deps: AppDeps,
+  caller: McpCaller,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await findDeck(deps, caller, args.presentation);
+  const result = await runMaterialTool(deps, deckBoard(deck.id), name, args);
+  if (!result) throw new ToolError(`Unknown tool ${name}.`);
+  const blocks =
+    typeof result.content === 'string'
+      ? [{ type: 'text' as const, text: result.content }]
+      : (result.content ?? []);
+  const content: McpContent[] = [];
+  for (const block of blocks) {
+    if (block.type === 'text') content.push({ type: 'text', text: block.text });
+    else if (block.type === 'image' && block.source.type === 'base64')
+      content.push({ type: 'image', data: block.source.data, mimeType: block.source.media_type });
+  }
+  return { content, isError: result.isError || undefined };
+}
+
+// ── Putting things on the board ───────────────────────────────────────────
+
+const GAP = 32;
+
+/**
+ * Where a new thing of `size` lies: beside `near` if given (to its right, then lower), else in the
+ * first free place scanning the board's area row by row – gaps first, then right of it all.
+ */
+async function freeFrame(
+  deps: AppDeps,
+  owner: BoardOwner,
+  size: { w: number; h: number },
+  near?: BoardFrame,
+): Promise<BoardFrame> {
+  const [materials, items] = await Promise.all([
+    deps.db
+      .select({ x: deckMaterials.x, y: deckMaterials.y, w: deckMaterials.w, h: deckMaterials.h })
+      .from(deckMaterials)
+      .where(ownedBy(deckMaterials, owner)),
+    deps.db
+      .select({
+        x: deckBoardItems.x,
+        y: deckBoardItems.y,
+        w: deckBoardItems.w,
+        h: deckBoardItems.h,
+      })
+      .from(deckBoardItems)
+      .where(ownedBy(deckBoardItems, owner)),
+  ]);
+  const taken = [...materials, ...items];
+  const free = (x: number, y: number) =>
+    taken.every(
+      (box) =>
+        x + size.w + GAP <= box.x ||
+        box.x + box.w + GAP <= x ||
+        y + size.h + GAP <= box.y ||
+        box.y + box.h + GAP <= y,
+    );
+  if (taken.length === 0) return { x: 0, y: 0, ...size };
+  if (near) {
+    for (let step = 0; step < 200; step++) {
+      const x = near.x + near.w + GAP;
+      const y = near.y + step * 40;
+      if (free(x, y)) return { x, y, ...size };
+    }
+  }
+  const left = Math.min(...taken.map((box) => box.x));
+  const top = Math.min(...taken.map((box) => box.y));
+  const right = Math.max(...taken.map((box) => box.x + box.w));
+  const width = Math.max(right - left, 1600);
+  for (let y = top; y < top + 40 * 400; y += 40)
+    for (let x = left; x <= left + width - size.w; x += 40)
+      if (free(x, y)) return { x, y, ...size };
+  return { x: right + GAP, y: top, ...size };
+}
+
+/** A sticker's size for its Markdown – about as the board sets it (360 wide, 15px lines). */
+function stickerSize(markdown: string): { w: number; h: number } {
+  const w = 360;
+  let lines = 0;
+  for (const line of markdown.split('\n')) {
+    // Measured on the board: 20px lines, about 40 characters a line (36 in a list, 26 in a heading).
+    const heading = /^#{1,6}\s/.test(line);
+    const listed = /^\s*([-*+]|\d+[.)])\s/.test(line);
+    const chars = line.replace(/[*_`#>[\]()]/g, '').length;
+    const perLine = heading ? 26 : listed ? 36 : 40;
+    lines += Math.max(1, Math.ceil(chars / perLine)) * (heading ? 1.5 : 1);
+  }
+  return { w, h: Math.min(2400, Math.max(120, Math.round(32 + lines * 20))) };
+}
+
+/** A board the tools below write to – a deck's or a text document's – and the link to it. */
+export interface BoardPlace {
+  owner: BoardOwner;
+  link: string;
+}
+
+const noteInput = z.object({
+  text: z.string().trim().min(1).max(MAX_BOARD_NOTE_LENGTH),
+  attach_to: z.string().min(1).max(100).optional(),
+});
+
+async function thingOnBoard(
+  deps: AppDeps,
+  owner: BoardOwner,
+  id: string,
+): Promise<BoardFrame & { kind: string }> {
+  const [material] = await deps.db
+    .select({ x: deckMaterials.x, y: deckMaterials.y, w: deckMaterials.w, h: deckMaterials.h })
+    .from(deckMaterials)
+    .where(and(eq(deckMaterials.id, id), ownedBy(deckMaterials, owner)));
+  if (material) return { ...material, kind: 'file' };
+  const [item] = await deps.db
+    .select({
+      x: deckBoardItems.x,
+      y: deckBoardItems.y,
+      w: deckBoardItems.w,
+      h: deckBoardItems.h,
+      kind: deckBoardItems.kind,
+    })
+    .from(deckBoardItems)
+    .where(and(eq(deckBoardItems.id, id), ownedBy(deckBoardItems, owner)));
+  if (item) return item;
+  throw new ToolError(
+    `Nothing with id "${id}" in the material – list_materials names what is there.`,
+  );
+}
+
+async function addNote(
+  deps: AppDeps,
+  viewer: Viewer,
+  { owner, link }: BoardPlace,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const input = noteInput.parse(args);
+  const near = input.attach_to ? await thingOnBoard(deps, owner, input.attach_to) : undefined;
+  const size = near
+    ? { w: BOARD_NOTE.w + 80, h: stickerSize(input.text).h }
+    : stickerSize(input.text);
+  const frame = await freeFrame(deps, owner, size, near);
+  const { item } = await createBoardItem(deps, viewer, owner, {
+    id: crypto.randomUUID(),
+    kind: near ? 'note' : 'box',
+    text: input.text,
+    url: null,
+    boundIds: near ? [input.attach_to!] : [],
+    rich: markdownToRich(input.text, { spaced: true }),
+    ...frame,
+  });
+  return text(`Note ${item.id} is in the material: ${link}`);
+}
+
+const linkInput = z.object({ url: boardUrlSchema, title: z.string().trim().max(300).optional() });
+
+async function addLink(
+  deps: AppDeps,
+  viewer: Viewer,
+  { owner, link }: BoardPlace,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const input = linkInput.parse(args);
+  const frame = await freeFrame(deps, owner, { w: 240, h: 96 });
+  const { item } = await createBoardItem(deps, viewer, owner, {
+    id: crypto.randomUUID(),
+    kind: 'link',
+    text: input.title ?? '',
+    url: input.url,
+    boundIds: [],
+    ...frame,
+  });
+  return text(`Link ${item.id} is in the material: ${link}`);
+}
+
+/**
+ * A file the app sends – never one Slider fetches for it: an address read off the board's files
+ * would let what a file says send the server anywhere (the page has no „file from a link“).
+ */
+const fileInput = z
+  .object({
+    name: z.string().trim().min(1, 'Give the file a name with its extension.').max(200),
+    text: z.string().min(1).optional(),
+    base64: z.string().min(1).optional(),
+  })
+  .refine((input) => [input.text, input.base64].filter(Boolean).length === 1, {
+    message: 'Give exactly one of text or base64.',
+  });
+
+async function addFile(
+  deps: AppDeps,
+  viewer: Viewer,
+  { owner, link }: BoardPlace,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const input = fileInput.parse(args);
+  let bytes: Uint8Array<ArrayBuffer>;
+  let name = input.name;
+  if (input.text !== undefined) {
+    bytes = new TextEncoder().encode(input.text) as Uint8Array<ArrayBuffer>;
+    if (!/\.[a-z0-9]{1,5}$/i.test(name)) name = `${name}.md`;
+  } else {
+    const clean = (input.base64 ?? '').replace(/^data:[^,]*,/, '').replace(/\s+/g, '');
+    bytes = new Uint8Array(Buffer.from(clean, 'base64'));
+    if (bytes.byteLength === 0) throw new ToolError('base64 holds no bytes.');
+  }
+  const frame = await freeFrame(deps, owner, MATERIAL_CARD);
+  const { material } = await addMaterial(
+    deps,
+    viewer,
+    owner,
+    { id: crypto.randomUUID(), ...frame },
+    { name, bytes },
+  );
+  return text(
+    `File ${material.id} „${material.name}“ (${material.kind}) is in the material${material.readState === 'pending' ? ' – Slider reads its text now' : ''}: ${link}`,
+  );
+}
+
+const updateInput = z.object({
+  item: z.string().min(1).max(100),
+  text: z.string().max(MAX_BOARD_NOTE_LENGTH),
+});
+
+async function updateNote(
+  deps: AppDeps,
+  viewer: Viewer,
+  { owner }: BoardPlace,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const input = updateInput.parse(args);
+  const [item] = await deps.db
+    .select({
+      kind: deckBoardItems.kind,
+      x: deckBoardItems.x,
+      y: deckBoardItems.y,
+      w: deckBoardItems.w,
+      h: deckBoardItems.h,
+      boundIds: deckBoardItems.boundIds,
+    })
+    .from(deckBoardItems)
+    .where(and(eq(deckBoardItems.id, input.item), ownedBy(deckBoardItems, owner)));
+  if (!item)
+    throw new ToolError(`No note "${input.item}" in the material – list_materials names them.`);
+  const rich = item.kind === 'box' || item.kind === 'note';
+  await updateBoardItem(deps, viewer, owner, input.item, {
+    text: input.text,
+    ...(rich && { rich: markdownToRich(input.text, { spaced: true }) }),
+  });
+  // A sticker on its own grows or shrinks with its text, as on the board.
+  if (item.kind === 'box' && item.boundIds.length === 0) {
+    const { h } = stickerSize(input.text);
+    if (Math.abs(h - item.h) > 8)
+      await moveBoard(deps, viewer, owner, {
+        frames: [{ id: input.item, x: item.x, y: item.y, w: item.w, h }],
+      });
+  }
+  return text(`Changed ${input.item}.`);
+}
+
+async function deleteItem(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await findDeck(deps, caller, args.presentation, 'view');
+  const owner = deckBoard(deck.id);
+  const viewer = caller.viewer;
+  const { item } = z.object({ item: z.string().min(1).max(100) }).parse(args);
+  await thingOnBoard(deps, owner, item);
+  await deleteBoardItem(deps, viewer, owner, item);
+  return text(`Deleted ${item} from the material.`);
+}
+
+/** The tools that write to a board, by name. */
+const BOARD_WRITERS = {
+  add_note: addNote,
+  add_link: addLink,
+  add_file: addFile,
+  update_note: updateNote,
+};
+
+/** The board of the presentation an app names, for the tools above: found as the caller may. */
+async function deckPlace(deps: AppDeps, caller: McpCaller, wanted: unknown): Promise<BoardPlace> {
+  const deck = await findDeck(deps, caller, wanted, 'comment');
+  return { owner: deckBoard(deck.id), link: deckLink(deps, deck.id) };
+}
+
+// ── Comments ───────────────────────────────────────────────────────────────
+
+const commentInput = z.object({
+  text: z.string().trim().min(1).max(10_000),
+  slide: z.number().int().min(1).optional(),
+  reply_to: z.string().min(1).max(100).optional(),
+});
+
+async function addComment(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await findDeck(deps, caller, args.presentation, 'comment');
+  const input = commentInput.parse(args);
+  let slideId: string | null;
+  if (input.reply_to) {
+    const parent = (await listComments(deps, caller.viewer, deck.id)).find(
+      (comment) => comment.id === input.reply_to,
+    );
+    if (!parent) throw new ToolError(`No comment "${input.reply_to}" – list_comments names them.`);
+    if (parent.parentId) throw new ToolError("Answer the thread's first comment (its root).");
+    slideId = parent.slideId;
+  } else if (input.slide) slideId = (await slideAt(deps, deck, input.slide)).id;
+  // A comment lies on a slide: without one it was refused further down, with words no app understood.
+  else throw new ToolError('Name the slide (`slide`) or the comment to answer (`reply_to`).');
+  const comment = await createComment(
+    deps,
+    caller.viewer,
+    deck.id,
+    createCommentInputSchema.parse({
+      slideId,
+      parentId: input.reply_to ?? null,
+      body: input.text,
+      anchor: { type: 'slide' },
+    }),
+  );
+  return text(
+    `Comment ${comment.id} written: ${deckLink(deps, deck.id, slideId ? `?slide=${encodeURIComponent(slideId)}` : '')}`,
+  );
+}
+
+const resolveInput = z.object({
+  comment: z.string().min(1).max(100),
+  done: z.boolean().optional(),
+});
+
+async function resolveComment(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await findDeck(deps, caller, args.presentation, 'comment');
+  const input = resolveInput.parse(args);
+  const found = (await listComments(deps, caller.viewer, deck.id)).find(
+    (comment) => comment.id === input.comment,
+  );
+  if (!found) throw new ToolError(`No comment "${input.comment}" – list_comments names them.`);
+  // Done or open is the thread's: its first comment carries it, as in Slider.
+  const done = input.done ?? true;
+  const root = await updateComment(deps, caller.viewer, found.parentId ?? found.id, {
+    status: done ? 'done' : 'open',
+  });
+  return text(
+    `Thread ${root.id} is ${done ? 'done' : 'open again'}: ${deckLink(deps, deck.id, root.slideId ? `?slide=${encodeURIComponent(root.slideId)}` : '')}`,
+  );
+}
+
+const undoInput = z.object({ edit: z.string().min(1).max(100), redo: z.boolean().optional() });
+
+async function undoEdit(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await findDeck(deps, caller, args.presentation, 'own');
+  const input = undoInput.parse(args);
+  const proposal = (await listProposals(deps, caller.viewer, deck.id)).find(
+    (each) => each.id === input.edit,
+  );
+  if (!proposal)
+    throw new ToolError(`No change "${input.edit}" of Slider's AI – list_comments names them.`);
+  if (input.redo) {
+    if (proposal.status !== 'reverted')
+      throw new ToolError(
+        proposal.status === 'applied'
+          ? 'That change is in the slides already.'
+          : `That change cannot be put in – Slider's AI ${proposalLine(proposal)}.`,
+      );
+    await reapplyProposal(deps, caller.viewer, deck.id, proposal.id);
+  } else {
+    if (proposal.status !== 'applied')
+      throw new ToolError(
+        proposal.status === 'reverted'
+          ? 'That change was taken back already.'
+          : `There is nothing to take back – Slider's AI ${proposalLine(proposal)}.`,
+      );
+    await revertProposal(deps, caller.viewer, deck.id, proposal.id);
+  }
+  return text(
+    `${input.redo ? 'Put the change in again' : 'Took the change back; its thread is open again'}. Check it with view_slide: ${deckLink(deps, deck.id)}`,
+  );
+}
+
+/** How long a tool waits for a deck's file to be read (a new one takes a few seconds). */
+const IMPORT_WAIT_MS = 90_000;
+
+/** The deck once its file is read – a deck just made is still being prepared for a moment. */
+async function whenRead(deps: AppDeps, deck: DeckRow, waitMs = IMPORT_WAIT_MS): Promise<DeckRow> {
+  const until = Date.now() + waitMs;
+  let now = deck;
+  while (now.importState.status === 'queued' || now.importState.status === 'running') {
+    if (Date.now() > until)
+      throw new ToolError('The presentation is still being prepared – try again in a minute.');
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const [row] = await deps.db.select().from(decks).where(eq(decks.id, deck.id));
+    if (!row) throw new ToolError('The presentation is gone.');
+    now = row;
+  }
+  return now;
+}
+
+const editInput = z.object({
+  slide: z.number().int().min(1),
+  instruction: z.string().trim().min(1).max(4000),
+});
+/** How long edit_slides waits for Slider's AI before it answers „still working“. */
+const EDIT_WAIT_MS = 120_000;
+
+/** What Slider's AI did for a request, told for the AI app. */
+function proposalLine(proposal: Pick<AiProposal, 'status' | 'summary' | 'error' | 'asks'>) {
+  const said = proposal.summary?.trim();
+  switch (proposal.status) {
+    case 'running':
+      return 'still working';
+    case 'applied':
+      return `changed the slides${said ? `: ${said}` : ''}`;
+    case 'ready':
+      return proposal.asks
+        ? `asks back: ${said ?? ''}`
+        : `changed nothing${said ? `: ${said}` : ''}`;
+    case 'failed':
+      return `failed: ${proposal.error ?? said ?? 'unknown'}`;
+    case 'reverted':
+      return `its change was undone${said ? ` (it had: ${said})` : ''}`;
+    default:
+      return proposal.status;
+  }
+}
+
+/**
+ * A request for Slider's AI as a person asks it: written as their comment on slide `number` (as
+ * `view_slide` counts), the AI sent on it – `edit_slides`, and an order said in a call about the
+ * slide in front of who said it (no agent of its own). Refused (no right to edit, no AI key)
+ * before anything is written: no comment left behind for a change that cannot be.
+ */
+export async function askSliderAi(
+  deps: AppDeps,
+  viewer: Viewer,
+  deck: DeckRow,
+  number: number,
+  instruction: string,
+): Promise<{ slide: Slide; proposal: AiProposal }> {
+  const slide = await slideAt(deps, deck, number);
+  await editTarget(deps, viewer, deck.id);
+  const comment = await createComment(
+    deps,
+    viewer,
+    deck.id,
+    createCommentInputSchema.parse({
+      slideId: slide.id,
+      parentId: null,
+      body: instruction,
+      anchor: { type: 'slide' },
+    }),
+  );
+  return {
+    slide,
+    proposal: await createProposal(deps, viewer, deck.id, { commentId: comment.id }),
+  };
+}
+
+async function editSlides(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const input = editInput.parse(args);
+  withinLimit(aiLimits(deps).aiRequests.hit(caller.viewer.author.id), 'AI requests');
+  const deck = await whenRead(deps, await findDeck(deps, caller, args.presentation, 'own'));
+  const { slide, proposal: started } = await askSliderAi(
+    deps,
+    caller.viewer,
+    deck,
+    input.slide,
+    input.instruction,
+  );
+  const link = deckLink(deps, deck.id, `?slide=${encodeURIComponent(slide.id)}`);
+  const until = Date.now() + EDIT_WAIT_MS;
+  let now = started;
+  while (now.status === 'running' && Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const [row] = await deps.db
+      .select({
+        status: aiProposals.status,
+        summary: aiProposals.summary,
+        error: aiProposals.error,
+        asks: aiProposals.asks,
+      })
+      .from(aiProposals)
+      .where(eq(aiProposals.id, started.id));
+    if (!row) break;
+    now = { ...now, ...row };
+  }
+  const next =
+    now.status === 'running'
+      ? ' It goes on in the background – list_comments shows the outcome in its thread, view_slide the slide.'
+      : now.status === 'applied'
+        ? ' Check it with view_slide; it can be undone in the comment thread in Slider.'
+        : now.asks
+          ? ' Ask the person, then call edit_slides again with the answer in the instruction.'
+          : '';
+  const said = `Slider's AI (edit ${started.id}) ${proposalLine(now)}`;
+  return {
+    content: [{ type: 'text', text: `${said}${/[.!?…]$/.test(said) ? '' : '.'}${next}\n${link}` }],
+    isError: now.status === 'failed' || undefined,
+  };
+}
+
+// ── New presentations ─────────────────────────────────────────────────────
+
+const createInput = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  workspace: z.string().optional(),
+  template: z.string().min(1).max(100).optional(),
+  folder: z.string().min(1).max(100).optional(),
+  area: z.string().min(1).max(100).optional(),
+});
+
+async function createPresentation(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const input = createInput.parse(args);
+  const userId = caller.viewer.author.id;
+  const workspace = await findWorkspace(deps, caller, input.workspace);
+  const workspaceId = await resolveUploadWorkspace(deps, userId, workspace.id);
+  // The hourly budget of „Neu“ in Slider: each one is imported and drawn.
+  withinLimit(countImport(deps, userId), 'new presentations');
+  const bytes = input.template
+    ? await deckFileFromMaster(deps, userId, workspaceId, input.template)
+    : await blankOdp(deps.clock.now());
+  const deck = await createDeckFromFile(
+    deps,
+    { ownerId: userId, workspaceId },
+    {
+      fileName: 'Neue Präsentation.odp',
+      bytes,
+      source: 'upload',
+      // One of Slider's own is no design of the workspace: nothing to link.
+      masterId: input.template?.startsWith(SLIDER_TEMPLATE_PREFIX)
+        ? null
+        : (input.template ?? null),
+    },
+  );
+  await offerCreation(deps.db, deck.id);
+  if (input.title)
+    await deps.db.update(decks).set({ title: input.title }).where(eq(decks.id, deck.id));
+  await placeNew(deps, caller.viewer, deck.id);
+  const [row] = await deps.db.select().from(decks).where(eq(decks.id, deck.id));
+  // Made from inside a folder or an area: it lies there, seen by whom sees that.
+  let place = "It lies in the person's own files („Meine Dateien“).";
+  if (row && (input.folder || input.area)) {
+    place = await placeDeck(
+      deps,
+      caller.viewer,
+      row,
+      input.folder ? { parentId: input.folder } : { areaId: input.area },
+    ).then(
+      () => 'It lies where it was to go.',
+      (error: unknown) =>
+        `It lies in the person's own files („Meine Dateien“) – not put there: ${error instanceof Error ? error.message : 'unknown'}`,
+    );
+  }
+  // Ready for the next call (edit_slides, view_slide) – a blank deck is read in seconds.
+  if (row) await whenRead(deps, row, 30_000).catch(() => undefined);
+  return text(
+    `Created „${input.title ?? deck.title}“ (id ${deck.id}) in ${workspace.name}: ${deckLink(deps, deck.id)}\n${place}\nNext: add its material (add_file, add_note, add_link), then build_presentation.`,
+  );
+}
+
+const buildInput = z.object({
+  description: z.string().trim().min(1).max(8000),
+  kind: deckKindSchema.optional(),
+  pages: z.number().int().min(MIN_CREATED_SLIDES).max(MAX_CREATED_SLIDES).optional(),
+});
+
+async function buildPresentation(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const input = buildInput.parse(args);
+  withinLimit(aiLimits(deps).deckCreations.hit(caller.viewer.author.id), 'presentations built');
+  const deck = await whenRead(deps, await findDeck(deps, caller, args.presentation, 'own'));
+  let templateId: string | null = null;
+  if (deck.masterId) {
+    const [master] = await deps.db
+      .select({ format: workspaceMasters.format })
+      .from(workspaceMasters)
+      .where(eq(workspaceMasters.id, deck.masterId));
+    if (master?.format === 'odp') templateId = deck.masterId;
+  }
+  const kind = input.kind ?? 'keynote';
+  const pages = input.pages ?? DECK_KINDS.find((each) => each.id === kind)!.pages;
+  await startCreation(deps, caller.viewer, deck.id, {
+    description: input.description,
+    kind,
+    pages,
+    templateId,
+  });
+  return text(
+    `Slider's AI is building ${pages} slides now – this takes a few minutes. get_presentation shows how far it is; the person can watch it in Slider: ${deckLink(deps, deck.id)}`,
+  );
+}
+
+// ── Managing a presentation ───────────────────────────────────────────────
+
+/** A presentation to manage – not a template being designed, which has its own page. */
+async function deckToManage(deps: AppDeps, caller: McpCaller, wanted: unknown) {
+  const deck = await findDeck(deps, caller, wanted, 'own');
+  if (deck.isTemplate)
+    throw new ToolError('That is a template being designed – the person manages it in Slider.');
+  return deck;
+}
+
+const updatePresentationInput = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  archived: z.boolean().optional(),
+});
+
+async function updatePresentation(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await deckToManage(deps, caller, args.presentation);
+  const input = updatePresentationInput.parse(args);
+  if (input.title === undefined && input.archived === undefined)
+    throw new ToolError(
+      'Say what to change: `title` or `archived`. A presentation is put into a folder or an area by moving it there, with its presentation id.',
+    );
+  const said: string[] = [];
+  if (input.title !== undefined) said.push(`renamed „${input.title}“`);
+  if (input.archived !== undefined) said.push(input.archived ? 'archived' : 'not archived');
+  const updated = await updateDeck(deps, deck, { title: input.title, archived: input.archived });
+  return text(`„${updated.title}“: ${said.join(', ')}. ${deckLink(deps, deck.id)}`);
+}
+
+const accessInput = z.object({
+  restricted: z.boolean().optional(),
+  people: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+});
+
+/** The member a name, address or id means – exactly one, else the app is told whom it could mean. */
+export function memberNamed(members: WorkspaceMember[], wanted: string): WorkspaceMember {
+  const key = searchFold(wanted);
+  const byId = members.filter(
+    (member) => member.userId === wanted || searchFold(member.email) === key,
+  );
+  const found =
+    byId.length > 0 ? byId : members.filter((member) => searchFold(member.name) === key);
+  if (found.length === 1) return found[0]!;
+  throw new ToolError(
+    found.length > 1
+      ? `${found.length} members are called "${wanted}" – name them by id: ${found.map((member) => `${member.name} (${member.userId})`).join(', ')}.`
+      : `"${wanted}" is not in the workspace. Its members: ${members.map((member) => member.name).join(', ')}.`,
+  );
+}
+
+async function setAccess(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await deckToManage(deps, caller, args.presentation);
+  const input = accessInput.parse(args);
+  const members = await listMembers(deps.db, caller.viewer.author.id, deck.workspaceId);
+  let access = await getDeckAccess(deps.db, deck);
+  if (input.restricted !== undefined || input.people) {
+    access = await setDeckAccess(deps, caller.viewer, deck, {
+      restricted: input.restricted ?? access.restricted,
+      userIds: input.people
+        ? input.people.map((wanted) => memberNamed(members, wanted).userId)
+        : access.userIds,
+    });
+  }
+  const nameOf = new Map(members.map((member) => [member.userId, member.name]));
+  const listed = access.userIds.map((id) => nameOf.get(id) ?? id).join(', ');
+  const who = access.restricted
+    ? `Only ${listed || 'nobody else'} open „${deck.title}“, besides its owner and the workspace's admins.`
+    : `Everyone in the workspace opens „${deck.title}“.${listed ? ` (Kept for when it is restricted again: ${listed}.)` : ''}`;
+  return text(
+    `${who}\nIn the workspace: ${members.map((member) => `${member.name} (${member.role})`).join(', ')}.`,
+  );
+}
+
+const downloadInput = z.object({
+  format: z.enum(['pdf', 'odp', 'png']).optional(),
+  slide: z.number().int().min(1).optional(),
+});
+/** Up to this a file comes attached; beyond it the link only. */
+const MAX_ATTACHED_BYTES = 10 * 1024 * 1024;
+
+async function downloadPresentation(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const input = downloadInput.parse(args);
+  if (input.format === 'png' && !input.slide)
+    throw new ToolError('A picture is of one slide – give `slide`.');
+  if (input.format === 'odp' && input.slide)
+    throw new ToolError(
+      'The file is the whole presentation – leave out `slide`, or take pdf or png.',
+    );
+  const deck = await whenRead(deps, await findDeck(deps, caller, args.presentation, 'own'));
+  const slide = input.slide ? await slideAt(deps, deck, input.slide) : null;
+  const format =
+    input.format === 'odp'
+      ? 'file'
+      : input.format === 'png'
+        ? 'slidePng'
+        : slide
+          ? 'slidePdf'
+          : 'pdf';
+  if (format !== 'file')
+    withinLimit(aiLimits(deps).pdfs.hit(caller.viewer.author.id), 'PDFs and pictures');
+  const file = await exportedFile(deps, caller.viewer, deck.id, format, slide?.id);
+  const path =
+    format === 'file'
+      ? 'file'
+      : format === 'pdf'
+        ? 'pdf'
+        : `slides/${encodeURIComponent(slide!.id)}/${format === 'slidePdf' ? 'pdf' : 'png'}`;
+  const link = `${deps.config.webOrigin}${API_PREFIX}/decks/${deck.id}/edit/${path}`;
+  const size = `${Math.max(1, Math.round(file.bytes.byteLength / 1024))} KB`;
+  const attached = file.bytes.byteLength <= MAX_ATTACHED_BYTES;
+  const content: McpContent[] = [
+    {
+      type: 'text',
+      text: `${file.fileName} (${size})${attached ? ' is attached' : ' is too big to attach'}. The person downloads it in a browser where they are signed in to Office: ${link}`,
+    },
+  ];
+  if (attached)
+    content.push({
+      type: 'resource',
+      resource: {
+        uri: link,
+        mimeType: file.contentType,
+        blob: Buffer.from(file.bytes).toString('base64'),
+      },
+    });
+  return { content };
+}
+
+async function deletePresentation(
+  deps: AppDeps,
+  caller: McpCaller,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const deck = await deckToManage(deps, caller, args.presentation);
+  // Into the trash, like „Löschen“ in the app: the person can still bring it back.
+  await trashDeck(deps, deck.id, caller.viewer.author.id);
+  return text(
+    `Deleted „${deck.title}“. It stays in the trash for ${DECK_TRASH_DAYS} days: its file in list_deleted, restore_files brings it back.`,
+  );
+}
+
+// ── Dispatch ───────────────────────────────────────────────────────────────
+
+/** Runs a tool for the caller; mistakes and refusals come back as the tool's error. */
+export async function runMcpTool(
+  deps: AppDeps,
+  caller: McpCaller,
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<McpToolResult> {
+  if (!TOOL_NAMES.has(name))
+    return { content: [{ type: 'text', text: `Unknown tool ${name}.` }], isError: true };
+  try {
+    switch (name) {
+      case 'search':
+        return await searchEverything(deps, caller, searchInput.parse(args).query);
+      case 'fetch':
+        return await fetchResult(deps, caller, fetchInput.parse(args).id);
+      case 'list_workspaces':
+        return await listWorkspacesTool(deps, caller);
+      case 'list_presentations':
+        return await listPresentations(deps, caller, listInput.parse(args));
+      case 'get_presentation':
+        return await getPresentation(deps, caller, args.presentation);
+      case 'view_slide':
+        return await viewSlide(deps, caller, args);
+      case 'list_comments':
+        return await listCommentsTool(deps, caller, args);
+      case 'add_comment':
+        return await addComment(deps, caller, args);
+      case 'resolve_comment':
+        return await resolveComment(deps, caller, args);
+      case 'edit_slides':
+        return await editSlides(deps, caller, args);
+      case 'undo_edit':
+        return await undoEdit(deps, caller, args);
+      case 'list_materials':
+        return await listMaterialsTool(deps, caller, args);
+      case 'add_note':
+      case 'add_link':
+      case 'add_file':
+      case 'update_note':
+        return await BOARD_WRITERS[name](
+          deps,
+          caller.viewer,
+          await deckPlace(deps, caller, args.presentation),
+          args,
+        );
+      case 'delete_item':
+        return await deleteItem(deps, caller, args);
+      case 'create_presentation':
+        return await createPresentation(deps, caller, args);
+      case 'build_presentation':
+        return await buildPresentation(deps, caller, args);
+      case 'update_presentation':
+        return await updatePresentation(deps, caller, args);
+      case 'set_access':
+        return await setAccess(deps, caller, args);
+      case 'download_presentation':
+        return await downloadPresentation(deps, caller, args);
+      case 'delete_presentation':
+        return await deletePresentation(deps, caller, args);
+      default:
+        return await materialTool(deps, caller, name, args);
+    }
+  } catch (error) {
+    return toolFailure(deps, name, error);
+  }
+}
+
+/** A tool's error as its answer – what the app or the AI may read of it. */
+export function toolFailure(deps: AppDeps, name: string, error: unknown): McpToolResult {
+  const message =
+    error instanceof ToolError || error instanceof ApiError
+      ? error.message
+      : error instanceof z.ZodError
+        ? z.prettifyError(error)
+        : null;
+  // Anything else (the database, a bug) is logged here and told without its text: an app
+  // gets no SQL or paths to read.
+  if (message === null) deps.log.error(`MCP tool ${name} failed`, error);
+  return {
+    content: [{ type: 'text', text: message ?? 'That did not work – a problem on the server.' }],
+    isError: true,
+  };
+}
+
+/**
+ * One of the tools that write to a board (add_note, add_link, add_file, update_note) on the
+ * board given – the chat on a text document's board „Material“ (`material-chat.ts`), which no
+ * app reaches. The services decide what the person may (`requireBoardAccess`).
+ */
+export async function runBoardTool(
+  deps: AppDeps,
+  viewer: Viewer,
+  place: BoardPlace,
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<McpToolResult> {
+  if (!(name in BOARD_WRITERS))
+    return { content: [{ type: 'text', text: `Unknown tool ${name}.` }], isError: true };
+  try {
+    return await BOARD_WRITERS[name as keyof typeof BOARD_WRITERS](deps, viewer, place, args);
+  } catch (error) {
+    return toolFailure(deps, name, error);
+  }
+}

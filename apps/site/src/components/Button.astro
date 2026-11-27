@@ -1,0 +1,87 @@
+---
+/**
+ * A link styled as the website's button: a solid pill with an arrow (primary in the page's colour, or white on a dark tile: inverse), an outlined pill (secondary) or plain text (ghost).
+ */
+interface Props {
+  href: string;
+  variant?: 'primary' | 'inverse' | 'secondary' | 'ghost';
+  size?: 'md' | 'lg';
+  class?: string;
+}
+
+const { href, variant = 'primary', size = 'lg', class: className } = Astro.props;
+const external = /^https?:|^mailto:/.test(href);
+---
+
+<a href={href} class:list={['site-btn', `site-btn-${variant}`, `site-btn-${size}`, className]} rel={external ? 'noopener' : undefined}>
+  <slot />
+  {(variant === 'primary' || variant === 'inverse') && <span class="site-btn-arrow" aria-hidden="true">→</span>}
+</a>
+
+<style>
+  .site-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border-radius: 999px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition:
+      background-color 150ms,
+      color 150ms,
+      box-shadow 200ms var(--ease-emphasized),
+      filter 150ms,
+      scale 150ms;
+  }
+  .site-btn-lg {
+    height: 52px;
+    padding: 0 26px;
+    font-size: 16px;
+  }
+  .site-btn-md {
+    height: 40px;
+    padding: 0 18px;
+    font-size: 14px;
+  }
+  /* The page's colour (`--brand-*`, site.css): the app's own, the gradient on the office's pages. */
+  .site-btn-primary {
+    background: var(--brand-fill);
+    color: var(--brand-on);
+    box-shadow: inset 0 0 0 1px var(--brand-edge);
+  }
+  .site-btn-inverse {
+    background: #fff;
+    color: var(--brand-ink);
+  }
+  .site-btn-primary:hover,
+  .site-btn-inverse:hover {
+    filter: brightness(1.1);
+  }
+  .site-btn-inverse:hover {
+    filter: brightness(0.94);
+  }
+  .site-btn-primary:active,
+  .site-btn-inverse:active {
+    scale: 0.98;
+  }
+  .site-btn-secondary {
+    color: var(--color-fg);
+    box-shadow: inset 0 0 0 1px var(--color-hairline-strong);
+  }
+  .site-btn-secondary:hover {
+    box-shadow: inset 0 0 0 1px var(--color-fg);
+  }
+  .site-btn-ghost {
+    color: var(--color-fg-muted);
+  }
+  .site-btn-ghost:hover {
+    color: var(--color-fg);
+  }
+  .site-btn-arrow {
+    transition: translate 200ms var(--ease-emphasized);
+  }
+  .site-btn:hover .site-btn-arrow {
+    translate: 3px 0;
+  }
+</style>

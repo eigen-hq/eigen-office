@@ -1,0 +1,886 @@
+import { randomBytes } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
+import {
+  FORMER_HOSTED_URLS,
+  HOSTED_URL,
+  MAX_MEDIA_BYTES,
+  MAX_UPLOAD_BYTES,
+  SIGNUP_MODES,
+  type CallIceServer,
+  type PlanId,
+  type SignupMode,
+} from '@slider/shared';
+import { LIBREOFFICE_TIMEOUT_MS } from './import/libreoffice';
+import { PDF_TIMEOUT_MS } from './import/pdf-jobs';
+import { DEFAULT_PLAN_LIMITS, UNLIMITED_PLAN, type PlanLimits } from './services/plans';
+
+/** A LiveKit server for calls (`services/call-sfu.ts`). */
+export interface SfuConfig {
+  /** What the browsers connect to, `wss://…`. */
+  url: string;
+  /** Where the server asks LiveKit's room API (close a room, send someone out), `http(s)://…`. */
+  apiUrl: string;
+  apiKey: string;
+  apiSecret: string;
+}
+
+export interface Config {
+  env: 'development' | 'production' | 'test';
+  port: number;
+  /**
+   * `HOST`: the address the server listens on; unset: every interface. The desktop app listens on
+   * `127.0.0.1` only – without a login, anyone reaching the port would act as its owner.
+   */
+  host?: string | null;
+  /**
+   * `SLIDER_DESKTOP`: the API runs inside the desktop app for one person on this machine – no
+   * login (dev login allowed in production), nothing deleted for being unused, loopback only.
+   */
+  desktop?: boolean;
+  /**
+   * `SLIDER_CLOUD_URL`, desktop only: the Slider server „Anmelden“ signs in to (BER-201), by
+   * default `https://office.bertro.dev` (`HOSTED_URL`); `null` off the desktop.
+   */
+  cloudUrl?: string | null;
+  /**
+   * `SLIDER_VERSION`: the release this server runs (e.g. `1.6.3`), shown in the settings. Set by
+   * the deploy (from the tag) and by the packaged desktop app; `null` from a checkout.
+   */
+  version?: string | null;
+  /** Holds `db/` (PGlite) and `blobs/` (file storage). */
+  dataDir: string;
+  /**
+   * Signs cookies and login codes, encrypts Microsoft tokens and stored settings. `SLIDER_SECRET`,
+   * else (production) generated once into `<dataDir>/secret`.
+   */
+  secret: string;
+  /** The public address (`SLIDER_URL`, formerly `WEB_ORIGIN`), without a trailing slash. */
+  webOrigin: string;
+  maxUploadBytes: number;
+  /**
+   * Cloud (the workspace's files): the largest file one upload may bring (`CLOUD_MAX_FILE_BYTES`,
+   * 5 GB when unset), and whether files can be opened to people outside by a link
+   * (`CLOUD_PUBLIC_LINKS=true`) or shared with a person by hand (`CLOUD_SHARING=true`) – both off
+   * unless said: who sees what follows from the workspace's roles and areas. Absent in tests
+   * that don't care.
+   */
+  cloud?: { maxFileBytes?: number; publicLinks?: boolean; sharing?: boolean };
+  /**
+   * With `auth.devLogin`, every request without a session cookie acts as this person. Whoever
+   * claims the instance with the setup token takes over its decks – see `services/accounts`.
+   */
+  devOwner: { name: string; email: string };
+  /** Login, sessions and who may sign up (BER-129). */
+  auth: AuthConfig;
+  /** Outgoing mail for invitations; `null` until SMTP_URL and MAIL_FROM are set. */
+  smtp: SmtpConfig | null;
+  /** Where the website's contact form is mailed (`CONTACT_EMAIL`); `null`: the form is off. */
+  contactEmail: string | null;
+  /** Deletion deadlines (BER-143). */
+  retention: RetentionConfig;
+  /** Requests per minute and IP on `/api/invites/*`. */
+  inviteRateLimit: number;
+  /** Entra app for „Weiter mit Microsoft“ (BER-129); `null` until MS_CLIENT_ID and MS_CLIENT_SECRET are set. */
+  microsoft: MicrosoftConfig | null;
+  /** Nextcloud as a source (BER-135). */
+  nextcloud: NextcloudConfig;
+  /** Voice and video comments (BER-116). */
+  media: MediaConfig;
+  /**
+   * Calls (`services/calls.ts`): `CALL_ICE_SERVERS`, a JSON list of STUN/TURN servers the
+   * browsers find each other through (`[{"urls":"stun:turn.example.org:3478"},{"urls":
+   * "turn:turn.example.org:3478","username":"…","credential":"…"}]`). Empty: browsers reach
+   * each other only directly (same network) – across the internet a TURN server is needed.
+   * `CALL_TURN_SECRET`: coturn's `static-auth-secret` (`use-auth-secret`) – then each one who
+   * joins a call gets their own TURN password for a few hours, instead of the list's static one.
+   * `sfu`: a LiveKit server that forwards the calls' sound and pictures (`LIVEKIT_URL`, or
+   * `wss://<CALL_DOMAIN>` for the one in deploy/docker-compose.yml) – then a call holds up to
+   * `MAX_SFU_CALL_PEERS` and the mesh above is not used. `null`: the mesh, up to 8 people.
+   * Absent in tests that don't care.
+   */
+  calls?: { iceServers: CallIceServer[]; turnSecret?: string | null; sfu?: SfuConfig | null };
+  /**
+   * Whether this instance limits its users at all: the hosted demo does (plans, one own
+   * workspace per account, storage), a self-hosted instance doesn't. See
+   * {@link isLimitedInstance}.
+   */
+  limited: boolean;
+  /** Limits per plan (BER-130); the free plan's can be overridden by env (self-hosting). */
+  plans: Record<PlanId, PlanLimits>;
+  /**
+   * Stripe for the paid plan (BER-152); `null` without STRIPE_* or on an instance without limits
+   * (self-hosting) – then there is no billing at all.
+   */
+  billing: BillingConfig | null;
+  /** Self-hosting: Postgres server, built SPA, reverse proxy. Absent in tests. */
+  hosting?: HostingConfig;
+  /**
+   * `LIBREOFFICE_PATH`: the `soffice` binary that renders slide images of uploads (BER-94).
+   * Unset → looked up on the PATH and in /Applications; not installed → SVG previews.
+   */
+  libreOfficePath?: string | null;
+  /**
+   * `SLIDER_TEMPLATES_DIR`: the templates Slider brings along, as `packages/templates` builds
+   * them (`index.json`, `<slug>.otp`, `<slug>/<n>.jpg`). Unset → that package's `library`.
+   */
+  sliderTemplatesDir?: string;
+  /**
+   * `LIBREOFFICE_TIMEOUT_MS`: how long one conversion may take before the deck falls back to SVG
+   * previews. Big decks with many pictures on a small server need more than the default.
+   */
+  libreOfficeTimeoutMs?: number;
+  /**
+   * `LIBREOFFICE_WORKERS`: LibreOffices kept running to draw edited slides (`office-pool.ts`) –
+   * each a few hundred MB, busy on one core while it draws. `0`: every drawing starts its own.
+   */
+  libreOfficeWorkers?: number;
+  /**
+   * `PDF_TIMEOUT_MS`: how long reading one PDF (and drawing its slide images) may take before it
+   * is cut off, plus a second per page. A PDF that takes longer fails its import.
+   */
+  pdfTimeoutMs?: number;
+  /**
+   * `IMPORT_WORKERS`: how many decks are imported side by side, each with its own LibreOffice
+   * (~1 CPU core and up to 1 GB RAM). Imports of one deck always run one after another.
+   */
+  importWorkers?: number;
+  /**
+   * Stock photos from Unsplash; `null` (or absent) until UNSPLASH_ACCESS_KEY is set. Taken over
+   * as one of the instance's photo keys (`integration-keys`).
+   */
+  unsplash?: UnsplashConfig | null;
+  /** `ANTHROPIC_API_KEY`: taken over as one of the instance's AI keys (`integration-keys`). */
+  anthropicApiKey?: string | null;
+  /** `MISTRAL_API_KEY`: taken over for speech to text and voice (live words follow from it). */
+  mistralApiKey?: string | null;
+  /** `BFL_API_KEY`: taken over for generating pictures (Black Forest Labs). */
+  bflApiKey?: string | null;
+  /** The AI cuts pictures out (rembg); `null` (or absent) until REMBG_URL is set. */
+  rembg?: RembgConfig | null;
+  /**
+   * `RSPAMD_URL`: an Rspamd (its normal worker, e.g. `http://rspamd:11333`) that checks the mails
+   * the mailboxes bring as well; `null` (or absent) – the provider's spam folder and the AI.
+   */
+  rspamdUrl?: string | null;
+  /**
+   * `RSPAMD_PASSWORD`: its controller's password – with it Rspamd learns from what people decide
+   * (`mail-filter`); `RSPAMD_CONTROLLER_URL` where that controller is, else `RSPAMD_URL` on 11334.
+   */
+  rspamdPassword?: string | null;
+  rspamdControllerUrl?: string | null;
+  /**
+   * Speech to text on the server itself (deploy/stt); `null` (or absent) until SPEECH_URL is set.
+   * Taken over once as a self-hosted key of the instance (`integration-keys`).
+   */
+  speech?: SpeechServerConfig | null;
+  /**
+   * `AI_ALLOW_INTERNAL_URLS`: the instance's OpenAI-compatible service may sit on an internal
+   * address or plain http – a local Ollama or vLLM. Workspaces' keys never may: the server would
+   * otherwise reach into its own network for whoever administers a workspace.
+   */
+  aiAllowInternalUrls?: boolean;
+}
+
+export interface UnsplashConfig {
+  /** The application's Access Key – only ever used by the server, which searches for everyone. */
+  accessKey: string;
+}
+
+export interface RembgConfig {
+  /** `REMBG_URL`: where rembg's server (`rembg s`) answers, e.g. `http://rembg:7000`. */
+  url: string;
+  /** `REMBG_MODEL`: the model it cuts out with – an open one, IS-Net by default. */
+  model: string;
+}
+
+export interface SpeechServerConfig {
+  /** `SPEECH_URL`: where it answers OpenAI's API, up to `/v1` – e.g. `http://stt:8000/v1`. */
+  url: string;
+  /** `SPEECH_MODEL`: the model it names, `whisper-large-v3-turbo` by default. */
+  model: string;
+}
+
+export interface RetentionConfig {
+  /**
+   * `DELETE_UNUSED`: accounts and decks nobody used for 18 months are deleted, with reminder mails
+   * before if mail is set up. On by default; the instance admin can switch it off (setup page).
+   */
+  deleteUnused: boolean;
+}
+
+export interface BillingConfig {
+  /** `sk_…` / `rk_…` (restricted key). */
+  secretKey: string;
+  /** `whsec_…` of the webhook endpoint `<SLIDER_URL>/api/billing/webhook`. */
+  webhookSecret: string;
+  /** `price_…` of the paid plan (per workspace, monthly or yearly – decided in Stripe). */
+  priceId: string;
+}
+
+export interface MediaConfig {
+  /**
+   * Folder for recordings, separate from the deck blobs so it can live anywhere – a synced or
+   * mounted folder, later an R2 bucket. Defaults to `<dataDir>/media`.
+   */
+  dir: string;
+  /** Per recording. */
+  maxBytes: number;
+}
+
+export interface AuthConfig {
+  /**
+   * Cookie-less requests act as the dev owner – no login at all. Default: on in development and
+   * tests when no login provider is configured; never in production.
+   */
+  devLogin: boolean;
+  /**
+   * Who may create an account. Invited people always may, and so may whoever holds the setup
+   * token while there is no instance admin yet. Nobody becomes admin by signing up.
+   */
+  signup: SignupMode;
+  /** For `signup: 'domains'`: verified e-mail domains that may sign up, lower-case. */
+  signupDomains: string[];
+  /** Generic OpenID Connect provider (Authentik, Keycloak, Zitadel, …). */
+  oidc: OidcConfig | null;
+  /** "Weiter mit Google": the OIDC client with Google's issuer; `null` without GOOGLE_*. */
+  google: OidcConfig | null;
+  /**
+   * `GOOGLE_MAILBOXES`: „Mit Google anmelden“ for mailboxes and their calendars, with the same
+   * client. Off by default – Google's mail scope is restricted, and until Google has verified the
+   * app only its test users get in; everyone else meets Google's warning or block.
+   */
+  googleMailboxes: boolean;
+  /** Session lifetime; renewed on use (at most once a day). */
+  sessionTtlDays: number;
+}
+
+export interface OidcConfig {
+  /** Discovery runs against `${issuer}/.well-known/openid-configuration`. */
+  issuer: string;
+  clientId: string;
+  clientSecret: string;
+  /** Button text on the login page. */
+  label: string;
+  scopes: string;
+  redirectUri: string;
+  /** Further spellings of the issuer in ID tokens (Google also sends `accounts.google.com`). */
+  issuerAliases?: string[];
+  /** Extra authorize parameters, e.g. `prompt=select_account`. */
+  authorizeParams?: Record<string, string>;
+  /**
+   * The browser is only sent to an https authorization endpoint on the issuer's host – for
+   * issuers someone other than the operator typed (a workspace's company login), so Slider's
+   * login link can't be turned into a redirect anywhere.
+   */
+  authorizeOnIssuerHost?: boolean;
+}
+
+export const GOOGLE_ISSUER = 'https://accounts.google.com';
+
+export interface SmtpConfig {
+  /** e.g. `smtps://user:pass@mail.example.com:465` */
+  url: string;
+  /** e.g. `Slider <slider@example.com>` */
+  from: string;
+}
+
+export interface MicrosoftConfig {
+  clientId: string;
+  clientSecret: string;
+  /** `common` = any work/school directory plus personal accounts. */
+  tenant: string;
+  /** Must match a redirect URI of the app registration exactly. */
+  redirectUri: string;
+}
+
+export interface NextcloudConfig {
+  /**
+   * `NEXTCLOUD_URL`: the organisation's Nextcloud. People connect it without typing an address,
+   * and it may live on an internal address – every other Nextcloud must be public (SSRF).
+   */
+  server: string | null;
+  /**
+   * "Weiter mit Nextcloud": an OAuth 2.0 client registered in that Nextcloud (`NEXTCLOUD_CLIENT_ID`,
+   * `NEXTCLOUD_CLIENT_SECRET`). Only for the organisation's Nextcloud: OAuth needs a client registered
+   * there. Other Nextclouds sign in with `loginAnyServer`.
+   */
+  login: NextcloudLoginConfig | null;
+  /**
+   * `NEXTCLOUD_LOGIN_ANY` (default on): "Weiter mit Nextcloud" for any public Nextcloud – the
+   * address typed, Login Flow v2, a new account only after the address is confirmed by mail.
+   * Not a login of its own for `hasLogin`: it needs mail and leaves the setup page in place.
+   */
+  loginAnyServer: boolean;
+}
+
+export interface NextcloudLoginConfig {
+  clientId: string;
+  clientSecret: string;
+  /** Must match the redirection URI of the client in Nextcloud exactly. */
+  redirectUri: string;
+}
+
+/** `https://cloud.example.de/index.php/` → `https://cloud.example.de`. */
+export const normalizeNextcloudServer = (url: string): string =>
+  url
+    .trim()
+    .replace(/[?#].*$/, '')
+    .replace(/\/+$/, '')
+    .replace(/\/index\.php$/, '')
+    .replace(/\/+$/, '');
+
+/** The hosted Slider: where the desktop app signs in unless told otherwise. */
+const DEFAULT_CLOUD_URL = HOSTED_URL;
+const DEV_SECRET = 'slider-dev-secret-do-not-use-in-production';
+const DEFAULT_DATA_DIR = fileURLToPath(new URL('../.data', import.meta.url));
+/** `.env` lives in the repo root, so relative paths in it are meant from there – not from `apps/api`. */
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+export const MICROSOFT_CALLBACK_PATH = '/api/auth/microsoft/callback';
+export const OIDC_CALLBACK_PATH = '/api/auth/oidc/callback';
+export const GOOGLE_CALLBACK_PATH = '/api/auth/google/callback';
+export const NEXTCLOUD_CALLBACK_PATH = '/api/auth/nextcloud/callback';
+/** Company login of a workspace (BER-162): one redirect URI for all of them. */
+export const SSO_CALLBACK_PATH = '/api/auth/sso/callback';
+const booleanEnv = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1');
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(8787),
+  HOST: z.string().min(1).optional(),
+  SLIDER_DESKTOP: booleanEnv.optional(),
+  SLIDER_CLOUD_URL: z.url({ protocol: /^https?$/ }).optional(),
+  SLIDER_VERSION: z.string().trim().min(1).max(40).optional(),
+  DATA_DIR: z.string().min(1).default(DEFAULT_DATA_DIR),
+  SLIDER_SECRET: z
+    .string()
+    .min(32, 'SLIDER_SECRET muss mindestens 32 Zeichen lang sein.')
+    .optional(),
+  /** The public address; `WEB_ORIGIN` is the older name of the same setting. */
+  SLIDER_URL: z.url().optional(),
+  WEB_ORIGIN: z.url().optional(),
+  MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(MAX_UPLOAD_BYTES),
+  CLOUD_MAX_FILE_BYTES: z.coerce.number().int().positive().optional(),
+  CLOUD_PUBLIC_LINKS: z.enum(['true', 'false']).optional(),
+  CLOUD_SHARING: z.enum(['true', 'false']).optional(),
+  DEV_OWNER_NAME: z.string().min(1).default('Robert Hofmann'),
+  DEV_OWNER_EMAIL: z.email().default('robert@example.org'),
+  INVITE_RATE_LIMIT: z.coerce.number().int().positive().default(30),
+  MS_CLIENT_ID: z.string().optional(),
+  MS_CLIENT_SECRET: z.string().optional(),
+  MS_TENANT: z.string().optional(),
+  NEXTCLOUD_URL: z
+    .url({ protocol: /^https?$/, error: 'NEXTCLOUD_URL muss mit https:// oder http:// beginnen.' })
+    .optional(),
+  NEXTCLOUD_CLIENT_ID: z.string().optional(),
+  NEXTCLOUD_CLIENT_SECRET: z.string().optional(),
+  NEXTCLOUD_LOGIN_ANY: booleanEnv.default(true),
+  AUTH_DEV_LOGIN: booleanEnv.optional(),
+  SIGNUP: z.enum(SIGNUP_MODES).default('open'),
+  SIGNUP_DOMAINS: z.string().optional(),
+  DELETE_UNUSED: booleanEnv.optional(),
+  SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  OIDC_ISSUER: z.url().optional(),
+  OIDC_CLIENT_ID: z.string().optional(),
+  OIDC_CLIENT_SECRET: z.string().optional(),
+  OIDC_LABEL: z.string().min(1).default('Weiter mit SSO'),
+  OIDC_SCOPES: z.string().min(1).default('openid profile email'),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_MAILBOXES: booleanEnv.optional(),
+  SMTP_URL: z
+    .string()
+    .regex(/^smtps?:\/\//, 'SMTP_URL muss mit smtp:// oder smtps:// beginnen.')
+    .optional(),
+  MAIL_FROM: z.string().min(3).optional(),
+  CONTACT_EMAIL: z.email().optional(),
+  MEDIA_DIR: z.string().min(1).optional(),
+  /** Older name of PLAN_FREE_MAX_STORAGE_BYTES (it counted recordings per deck owner). */
+  MEDIA_QUOTA_BYTES: z.coerce.number().int().min(0).optional(),
+  MAX_MEDIA_BYTES: z.coerce.number().int().positive().default(MAX_MEDIA_BYTES),
+  /** Forces the demo's limits on (`true`) or off (`false`); see {@link isLimitedInstance}. */
+  SLIDER_DEMO: booleanEnv.optional(),
+  PLAN_FREE_MAX_MEMBERS: z.coerce.number().int().min(0).optional(),
+  PLAN_FREE_MAX_DECKS: z.coerce.number().int().min(0).optional(),
+  /** `0` = unlimited. Every file of a workspace's reviews counts (BER-151). */
+  PLAN_FREE_MAX_STORAGE_BYTES: z.coerce.number().int().min(0).optional(),
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_PRICE_ID: z.string().optional(),
+  LIBREOFFICE_PATH: z.string().min(1).optional(),
+  SLIDER_TEMPLATES_DIR: z.string().min(1).optional(),
+  LIBREOFFICE_TIMEOUT_MS: z.coerce.number().int().min(10_000).default(LIBREOFFICE_TIMEOUT_MS),
+  LIBREOFFICE_WORKERS: z.coerce.number().int().min(0).max(32).default(2),
+  PDF_TIMEOUT_MS: z.coerce.number().int().min(10_000).default(PDF_TIMEOUT_MS),
+  IMPORT_WORKERS: z.coerce.number().int().min(1).max(16).default(1),
+  UNSPLASH_ACCESS_KEY: z.string().min(10).optional(),
+  ANTHROPIC_API_KEY: z.string().startsWith('sk-ant-').optional(),
+  MISTRAL_API_KEY: z.string().min(10).optional(),
+  BFL_API_KEY: z.string().min(10).optional(),
+  REMBG_URL: z.url().optional(),
+  REMBG_MODEL: z.string().min(1).default('isnet-general-use'),
+  RSPAMD_URL: z.url().optional(),
+  RSPAMD_PASSWORD: z.string().min(12).optional(),
+  RSPAMD_CONTROLLER_URL: z.url().optional(),
+  SPEECH_URL: z.url().optional(),
+  SPEECH_MODEL: z.string().min(1).default('whisper-large-v3-turbo'),
+  AI_ALLOW_INTERNAL_URLS: booleanEnv.optional(),
+  CALL_ICE_SERVERS: z.string().optional(),
+  CALL_TURN_SECRET: z.string().min(16).optional(),
+  // LiveKit for calls of many (`sfuFrom`): its address for the browsers, or the call domain of
+  // deploy/docker-compose.yml; its room API; its key pair (else generated into the data volume).
+  LIVEKIT_URL: z
+    .url()
+    .regex(/^wss?:\/\//, 'LIVEKIT_URL beginnt mit wss:// (oder ws:// lokal).')
+    .optional(),
+  LIVEKIT_API_URL: z
+    .url()
+    .regex(/^https?:\/\//, 'LIVEKIT_API_URL beginnt mit https:// oder http://.')
+    .optional(),
+  LIVEKIT_API_KEY: z
+    .string()
+    .regex(/^[\w-]{3,64}$/, 'LIVEKIT_API_KEY: Buchstaben, Ziffern, - und _.')
+    .optional(),
+  LIVEKIT_API_SECRET: z
+    .string()
+    .min(32, 'LIVEKIT_API_SECRET muss mindestens 32 Zeichen lang sein.')
+    .optional(),
+  CALL_DOMAIN: z
+    .string()
+    .regex(/^[a-z0-9.-]+$/i, 'CALL_DOMAIN ist ein Hostname, z. B. call.firma.de.')
+    .optional(),
+});
+
+/** Env value → limit: unset keeps the default, `0` means unlimited (`null`). */
+const limitFromEnv = (value: number | undefined, fallback: number | null) =>
+  value === undefined ? fallback : value === 0 ? null : value;
+
+/** The hosted demo, at its address and the one it had before; every other is self-hosted. */
+export const DEMO_HOSTS = [HOSTED_URL, ...FORMER_HOSTED_URLS].map((url) => new URL(url).hostname);
+
+/**
+ * Limits only apply on the hosted demo, where hosting costs money: recognised by its address,
+ * or forced with `SLIDER_DEMO=true`. Every other instance – self-hosted, and development too –
+ * runs without limits; the `PLAN_FREE_*` variables still set some
+ * explicitly.
+ */
+export function isLimitedInstance(webOrigin: string, demo: boolean | undefined): boolean {
+  return demo ?? DEMO_HOSTS.includes(new URL(webOrigin).hostname);
+}
+
+/**
+ * https://, or plain http on this machine (localhost, 127.0.0.1, ::1) – the addresses where
+ * browsers keep `Secure` cookies.
+ */
+export function isSecureOrigin(origin: string): boolean {
+  const url = new URL(origin);
+  if (url.protocol === 'https:') return true;
+  const host = url.hostname;
+  return (
+    url.protocol === 'http:' &&
+    (host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host === '[::1]' ||
+      /^127(\.\d{1,3}){3}$/.test(host))
+  );
+}
+
+/** What the server needs before the database is open: data folder, secret, database. */
+export type BootConfig = Pick<Config, 'env' | 'dataDir' | 'secret' | 'hosting'>;
+
+/**
+ * The boot part of the config, without the cross-field checks of logins, mail and sign-up: one
+ * half of a pair (e.g. GOOGLE_CLIENT_ID) may come from the environment and the other from the
+ * setup page. {@link loadConfig} validates the merged settings once the database is open.
+ */
+export function loadBootConfig(env: NodeJS.ProcessEnv = process.env): BootConfig {
+  const parsed = envSchema
+    .pick({ NODE_ENV: true, DATA_DIR: true, SLIDER_SECRET: true })
+    .parse(stripEmpty(env));
+  const dataDir = path.resolve(REPO_ROOT, parsed.DATA_DIR);
+  const secret =
+    parsed.SLIDER_SECRET ??
+    (parsed.NODE_ENV === 'production' ? loadOrCreateSecret(dataDir) : DEV_SECRET);
+  return {
+    env: parsed.NODE_ENV,
+    dataDir,
+    secret,
+    hosting: loadHostingConfig(env, parsed.NODE_ENV),
+  };
+}
+
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  warn: (msg: string) => void = console.warn,
+): Config {
+  const parsed = envSchema.parse(stripEmpty(env));
+  const dataDir = path.resolve(REPO_ROOT, parsed.DATA_DIR);
+  const configuredUrl = parsed.SLIDER_URL ?? parsed.WEB_ORIGIN;
+  if (!configuredUrl && parsed.NODE_ENV === 'production') {
+    throw new Error(
+      'SLIDER_URL must be set in production: the public address, e.g. SLIDER_URL=https://slider.firma.de',
+    );
+  }
+  const webOrigin = (configuredUrl ?? 'http://localhost:5173').replace(/\/+$/, '');
+  if (parsed.NODE_ENV === 'production' && !isSecureOrigin(webOrigin)) {
+    // Login cookies are `Secure` in production; a browser drops them on a plain-http address,
+    // so nobody could ever sign in – and nothing else would say why.
+    throw new Error(
+      `SLIDER_URL must start with https:// in production (got ${webOrigin}): login cookies are Secure and browsers drop them on http://. Put Slider behind HTTPS, e.g. with the Caddy setup in deploy/.`,
+    );
+  }
+  let secret = parsed.SLIDER_SECRET;
+  if (!secret) {
+    if (parsed.NODE_ENV === 'production') secret = loadOrCreateSecret(dataDir);
+    else warn('SLIDER_SECRET is not set – using an insecure development secret.');
+  }
+  const microsoft: MicrosoftConfig | null =
+    parsed.MS_CLIENT_ID && parsed.MS_CLIENT_SECRET
+      ? {
+          clientId: parsed.MS_CLIENT_ID,
+          clientSecret: parsed.MS_CLIENT_SECRET,
+          tenant: parsed.MS_TENANT ?? 'common',
+          redirectUri: new URL(MICROSOFT_CALLBACK_PATH, webOrigin).toString(),
+        }
+      : null;
+  const oidc: OidcConfig | null =
+    parsed.OIDC_ISSUER && parsed.OIDC_CLIENT_ID && parsed.OIDC_CLIENT_SECRET
+      ? {
+          issuer: parsed.OIDC_ISSUER.replace(/\/+$/, ''),
+          clientId: parsed.OIDC_CLIENT_ID,
+          clientSecret: parsed.OIDC_CLIENT_SECRET,
+          label: parsed.OIDC_LABEL,
+          scopes: parsed.OIDC_SCOPES,
+          redirectUri: new URL(OIDC_CALLBACK_PATH, webOrigin).toString(),
+        }
+      : null;
+  if (parsed.OIDC_ISSUER && !oidc) {
+    throw new Error('OIDC_ISSUER needs OIDC_CLIENT_ID and OIDC_CLIENT_SECRET.');
+  }
+  if (Boolean(parsed.GOOGLE_CLIENT_ID) !== Boolean(parsed.GOOGLE_CLIENT_SECRET)) {
+    throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together.');
+  }
+  const google: OidcConfig | null =
+    parsed.GOOGLE_CLIENT_ID && parsed.GOOGLE_CLIENT_SECRET
+      ? {
+          issuer: GOOGLE_ISSUER,
+          clientId: parsed.GOOGLE_CLIENT_ID,
+          clientSecret: parsed.GOOGLE_CLIENT_SECRET,
+          label: 'Weiter mit Google',
+          scopes: 'openid email profile',
+          redirectUri: new URL(GOOGLE_CALLBACK_PATH, webOrigin).toString(),
+          issuerAliases: ['accounts.google.com'],
+          authorizeParams: { prompt: 'select_account' },
+        }
+      : null;
+  if (Boolean(parsed.NEXTCLOUD_CLIENT_ID) !== Boolean(parsed.NEXTCLOUD_CLIENT_SECRET)) {
+    throw new Error('NEXTCLOUD_CLIENT_ID and NEXTCLOUD_CLIENT_SECRET must be set together.');
+  }
+  if (parsed.NEXTCLOUD_CLIENT_ID && !parsed.NEXTCLOUD_URL) {
+    throw new Error('NEXTCLOUD_CLIENT_ID needs NEXTCLOUD_URL: the Nextcloud people sign in with.');
+  }
+  const nextcloudLogin: NextcloudLoginConfig | null =
+    parsed.NEXTCLOUD_URL && parsed.NEXTCLOUD_CLIENT_ID && parsed.NEXTCLOUD_CLIENT_SECRET
+      ? {
+          clientId: parsed.NEXTCLOUD_CLIENT_ID,
+          clientSecret: parsed.NEXTCLOUD_CLIENT_SECRET,
+          redirectUri: new URL(NEXTCLOUD_CALLBACK_PATH, webOrigin).toString(),
+        }
+      : null;
+  if (Boolean(parsed.SMTP_URL) !== Boolean(parsed.MAIL_FROM)) {
+    throw new Error('SMTP_URL and MAIL_FROM must be set together.');
+  }
+  const smtp =
+    parsed.SMTP_URL && parsed.MAIL_FROM ? { url: parsed.SMTP_URL, from: parsed.MAIL_FROM } : null;
+  const hasLoginProvider = Boolean(microsoft || oidc || google || nextcloudLogin);
+  // Production without any login starts anyway: the setup page (`/einrichtung`) configures one.
+  const desktop = parsed.SLIDER_DESKTOP ?? false;
+  if (parsed.NODE_ENV === 'production' && parsed.AUTH_DEV_LOGIN && !desktop) {
+    throw new Error('AUTH_DEV_LOGIN cannot be enabled in production.');
+  }
+  // The desktop app is one person on their own machine: no login, like development.
+  const devLogin =
+    (parsed.NODE_ENV !== 'production' || desktop) && (parsed.AUTH_DEV_LOGIN ?? !hasLoginProvider);
+  const host = parsed.HOST ?? (desktop ? '127.0.0.1' : null);
+  if (desktop && devLogin && host !== '127.0.0.1' && host !== '::1' && host !== 'localhost') {
+    throw new Error(
+      'SLIDER_DESKTOP without a login listens on this machine only (HOST=127.0.0.1).',
+    );
+  }
+  const signupDomains = (parsed.SIGNUP_DOMAINS ?? '')
+    .split(',')
+    .map((domain) => domain.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean);
+  if (parsed.SIGNUP === 'domains' && signupDomains.length === 0) {
+    throw new Error('SIGNUP=domains needs SIGNUP_DOMAINS, e.g. SIGNUP_DOMAINS=firma.de,firma.com');
+  }
+  const limited = isLimitedInstance(webOrigin, parsed.SLIDER_DEMO);
+  const planDefaults = limited ? DEFAULT_PLAN_LIMITS.free : UNLIMITED_PLAN;
+  const stripeKeys = [
+    parsed.STRIPE_SECRET_KEY,
+    parsed.STRIPE_WEBHOOK_SECRET,
+    parsed.STRIPE_PRICE_ID,
+  ].filter(Boolean).length;
+  if (stripeKeys > 0 && stripeKeys < 3) {
+    throw new Error(
+      'STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET and STRIPE_PRICE_ID must be set together.',
+    );
+  }
+  if (stripeKeys === 3 && !limited) {
+    warn('STRIPE_* is ignored: this instance has no limits, so there is nothing to pay for.');
+  }
+  const billing: BillingConfig | null =
+    limited && parsed.STRIPE_SECRET_KEY && parsed.STRIPE_WEBHOOK_SECRET && parsed.STRIPE_PRICE_ID
+      ? {
+          secretKey: parsed.STRIPE_SECRET_KEY,
+          webhookSecret: parsed.STRIPE_WEBHOOK_SECRET,
+          priceId: parsed.STRIPE_PRICE_ID,
+        }
+      : null;
+  return {
+    env: parsed.NODE_ENV,
+    port: parsed.PORT,
+    host,
+    desktop,
+    cloudUrl: desktop ? (parsed.SLIDER_CLOUD_URL ?? DEFAULT_CLOUD_URL).replace(/\/+$/, '') : null,
+    version: parsed.SLIDER_VERSION?.replace(/^v/, '') ?? null,
+    dataDir,
+    secret: secret ?? DEV_SECRET,
+    webOrigin,
+    maxUploadBytes: parsed.MAX_UPLOAD_BYTES,
+    cloud: {
+      ...(parsed.CLOUD_MAX_FILE_BYTES ? { maxFileBytes: parsed.CLOUD_MAX_FILE_BYTES } : {}),
+      publicLinks: parsed.CLOUD_PUBLIC_LINKS === 'true',
+      sharing: parsed.CLOUD_SHARING === 'true',
+    },
+    devOwner: { name: parsed.DEV_OWNER_NAME, email: parsed.DEV_OWNER_EMAIL },
+    auth: {
+      devLogin,
+      signup: parsed.SIGNUP,
+      signupDomains,
+      oidc,
+      google,
+      googleMailboxes: parsed.GOOGLE_MAILBOXES ?? false,
+      sessionTtlDays: parsed.SESSION_TTL_DAYS,
+    },
+    smtp,
+    contactEmail: parsed.CONTACT_EMAIL ?? null,
+    // On the desktop, the decks are the person's own files: nothing goes for being unused.
+    retention: { deleteUnused: parsed.DELETE_UNUSED ?? !desktop },
+    inviteRateLimit: parsed.INVITE_RATE_LIMIT,
+    microsoft,
+    nextcloud: {
+      server: parsed.NEXTCLOUD_URL ? normalizeNextcloudServer(parsed.NEXTCLOUD_URL) : null,
+      login: nextcloudLogin,
+      loginAnyServer: parsed.NEXTCLOUD_LOGIN_ANY,
+    },
+    media: {
+      dir: parsed.MEDIA_DIR
+        ? path.resolve(REPO_ROOT, expandHome(parsed.MEDIA_DIR))
+        : path.join(dataDir, 'media'),
+      maxBytes: parsed.MAX_MEDIA_BYTES,
+    },
+    limited,
+    plans: {
+      free: {
+        maxMembers: limitFromEnv(parsed.PLAN_FREE_MAX_MEMBERS, planDefaults.maxMembers),
+        maxDecks: limitFromEnv(parsed.PLAN_FREE_MAX_DECKS, planDefaults.maxDecks),
+        maxStorageBytes: limitFromEnv(
+          parsed.PLAN_FREE_MAX_STORAGE_BYTES ?? parsed.MEDIA_QUOTA_BYTES,
+          planDefaults.maxStorageBytes,
+        ),
+      },
+      paid: limited ? DEFAULT_PLAN_LIMITS.paid : UNLIMITED_PLAN,
+    },
+    billing,
+    hosting: loadHostingConfig(env, parsed.NODE_ENV),
+    libreOfficePath: parsed.LIBREOFFICE_PATH
+      ? path.resolve(REPO_ROOT, expandHome(parsed.LIBREOFFICE_PATH))
+      : null,
+    ...(parsed.SLIDER_TEMPLATES_DIR && {
+      sliderTemplatesDir: path.resolve(REPO_ROOT, expandHome(parsed.SLIDER_TEMPLATES_DIR)),
+    }),
+    libreOfficeTimeoutMs: parsed.LIBREOFFICE_TIMEOUT_MS,
+    libreOfficeWorkers: parsed.LIBREOFFICE_WORKERS,
+    pdfTimeoutMs: parsed.PDF_TIMEOUT_MS,
+    importWorkers: parsed.IMPORT_WORKERS,
+    unsplash: parsed.UNSPLASH_ACCESS_KEY ? { accessKey: parsed.UNSPLASH_ACCESS_KEY } : null,
+    anthropicApiKey: parsed.ANTHROPIC_API_KEY ?? null,
+    mistralApiKey: parsed.MISTRAL_API_KEY ?? null,
+    bflApiKey: parsed.BFL_API_KEY ?? null,
+    rembg: parsed.REMBG_URL ? { url: parsed.REMBG_URL, model: parsed.REMBG_MODEL } : null,
+    rspamdUrl: parsed.RSPAMD_URL ?? null,
+    rspamdPassword: parsed.RSPAMD_PASSWORD ?? null,
+    rspamdControllerUrl: parsed.RSPAMD_CONTROLLER_URL ?? null,
+    speech: parsed.SPEECH_URL ? { url: parsed.SPEECH_URL, model: parsed.SPEECH_MODEL } : null,
+    aiAllowInternalUrls: parsed.AI_ALLOW_INTERNAL_URLS ?? false,
+    calls: {
+      iceServers: parseIceServers(parsed.CALL_ICE_SERVERS),
+      turnSecret: parsed.CALL_TURN_SECRET ?? null,
+      sfu: sfuFrom(parsed, dataDir, warn),
+    },
+  };
+}
+
+/** `~/Dropbox/slider-media` → the home directory; `.env` does no shell expansion. */
+function expandHome(dir: string): string {
+  return dir === '~' || dir.startsWith('~/') ? path.join(homedir(), dir.slice(1)) : dir;
+}
+
+/** `KEY=` lines in `.env` arrive as empty strings; treat them like unset keys so defaults apply. */
+export function stripEmpty(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([, value]) => value !== ''));
+}
+
+/** Whether anyone can sign in at all: Microsoft, Google, OIDC or Nextcloud. */
+export const hasLogin = (config: Pick<Config, 'microsoft' | 'auth' | 'nextcloud'>): boolean =>
+  Boolean(config.microsoft || config.auth.google || config.auth.oidc || config.nextcloud.login);
+
+/**
+ * Settings saved on the setup page (`services/instance-settings`) under their env names, merged
+ * below the environment: what the environment sets always wins.
+ */
+export const withStoredSettings = (
+  env: NodeJS.ProcessEnv,
+  stored: Record<string, string>,
+): NodeJS.ProcessEnv => ({ ...stored, ...stripEmpty(env) });
+
+const SECRET_FILE = 'secret';
+
+/**
+ * Without `SLIDER_SECRET`, production generates one on the first start and keeps it in the data
+ * volume (readable by the server only) – so `docker run` needs no secret at all.
+ */
+function loadOrCreateSecret(dataDir: string): string {
+  const file = path.join(dataDir, SECRET_FILE);
+  if (existsSync(file)) {
+    const stored = readFileSync(file, 'utf8').trim();
+    if (stored.length >= 32) return stored;
+    throw new Error(`${file} holds no usable secret (at least 32 characters).`);
+  }
+  mkdirSync(dataDir, { recursive: true });
+  const secret = randomBytes(48).toString('base64url');
+  writeFileSync(file, `${secret}\n`, { mode: 0o600, flag: 'wx' });
+  chmodSync(file, 0o600);
+  return secret;
+}
+
+/** The key pair of `livekit-server --dev` – for a LiveKit on this computer only. */
+const LIVEKIT_DEV_KEYS = { apiKey: 'devkey', apiSecret: 'secret' };
+/** Where the generated LiveKit key pair lives; deploy/docker-compose.yml hands it to LiveKit. */
+const LIVEKIT_KEY_FILE = path.join('livekit', 'keys.yaml');
+
+/**
+ * The LiveKit server of the calls, if there is one: `LIVEKIT_URL`, else `wss://<CALL_DOMAIN>`
+ * (deploy/docker-compose.yml's own, its room API then at `http://livekit:7880` on the Compose
+ * network). Its key pair comes from `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` (required with
+ * `LIVEKIT_URL` in production), else – for the bundled one in production – it is generated on the first start into `<dataDir>/livekit/keys.yaml`, the file LiveKit reads
+ * (`--key-file`), so nobody has to make one.
+ */
+function sfuFrom(
+  parsed: z.infer<typeof envSchema>,
+  dataDir: string,
+  warn: (msg: string) => void,
+): SfuConfig | null {
+  const url =
+    parsed.LIVEKIT_URL ?? (parsed.CALL_DOMAIN ? `wss://${parsed.CALL_DOMAIN}` : undefined);
+  if (!url) return null;
+  if (!parsed.LIVEKIT_API_KEY !== !parsed.LIVEKIT_API_SECRET)
+    throw new Error('LIVEKIT_API_KEY und LIVEKIT_API_SECRET gehören zusammen – beide oder keins.');
+  let keys = { apiKey: parsed.LIVEKIT_API_KEY ?? '', apiSecret: parsed.LIVEKIT_API_SECRET ?? '' };
+  if (!keys.apiKey) {
+    // A LiveKit of one's own elsewhere (LIVEKIT_URL) never reads the generated file.
+    if (parsed.NODE_ENV === 'production' && parsed.LIVEKIT_URL)
+      throw new Error('LIVEKIT_URL braucht LIVEKIT_API_KEY und LIVEKIT_API_SECRET dieses LiveKit.');
+    if (parsed.NODE_ENV === 'production') keys = loadOrCreateLivekitKeys(dataDir);
+    else {
+      warn('LIVEKIT_API_KEY is not set – using the key pair of `livekit-server --dev`.');
+      keys = LIVEKIT_DEV_KEYS;
+    }
+  }
+  const apiUrl =
+    parsed.LIVEKIT_API_URL ??
+    (parsed.LIVEKIT_URL ? parsed.LIVEKIT_URL.replace(/^ws/, 'http') : 'http://livekit:7880');
+  return { url: url.replace(/\/+$/, ''), apiUrl: apiUrl.replace(/\/+$/, ''), ...keys };
+}
+
+/**
+ * LiveKit's key pair, made once and kept in the data volume like the secret: a YAML line
+ * `<key>: <secret>` – the format of LiveKit's `--key-file`, which refuses a file others may read.
+ */
+function loadOrCreateLivekitKeys(dataDir: string): { apiKey: string; apiSecret: string } {
+  const file = path.join(dataDir, LIVEKIT_KEY_FILE);
+  if (existsSync(file)) {
+    const line = /^([\w-]+):\s*(\S{32,})\s*$/m.exec(readFileSync(file, 'utf8'));
+    if (line?.[1] && line[2]) return { apiKey: line[1], apiSecret: line[2] };
+    throw new Error(`${file} holds no usable LiveKit key pair (\`<key>: <secret>\`).`);
+  }
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const keys = {
+    apiKey: `slider${randomBytes(6).toString('hex')}`,
+    apiSecret: randomBytes(36).toString('base64url'),
+  };
+  writeFileSync(file, `${keys.apiKey}: ${keys.apiSecret}\n`, { mode: 0o600, flag: 'wx' });
+  chmodSync(file, 0o600);
+  return keys;
+}
+
+export const dataPaths = (config: Pick<Config, 'dataDir'>) => ({
+  dbDir: path.join(config.dataDir, 'db'),
+  blobsDir: path.join(config.dataDir, 'blobs'),
+});
+
+// ── Self-hosting ────────────────────────────────────────────────────────────────────────────
+
+export interface HostingConfig {
+  /** `postgres://…` → a Postgres server; `null` → PGlite in `<dataDir>/db`. */
+  databaseUrl: string | null;
+  /** Built web app (`apps/web/dist`) served by the API itself; `null` → API only (dev: Vite). */
+  webDistDir: string | null;
+  /** Behind a reverse proxy (Caddy): take the client address from `X-Forwarded-For`. */
+  trustProxy: boolean;
+}
+
+const hostingEnvSchema = z.object({
+  DATABASE_URL: z
+    .string()
+    .regex(/^postgres(ql)?:\/\//i, 'DATABASE_URL muss mit postgres:// beginnen.')
+    .optional(),
+  WEB_DIST_DIR: z.string().min(1).optional(),
+  TRUST_PROXY: booleanEnv.optional(),
+});
+
+function loadHostingConfig(env: NodeJS.ProcessEnv, nodeEnv: Config['env']): HostingConfig {
+  const parsed = hostingEnvSchema.parse(stripEmpty(env));
+  const webDist = parsed.WEB_DIST_DIR ?? (nodeEnv === 'production' ? 'apps/web/dist' : null);
+  return {
+    databaseUrl: parsed.DATABASE_URL ?? null,
+    webDistDir: webDist ? path.resolve(REPO_ROOT, webDist) : null,
+    trustProxy: parsed.TRUST_PROXY ?? false,
+  };
+}
+
+/** `CALL_ICE_SERVERS`: a JSON list of STUN/TURN servers (`RTCIceServer`), checked loosely. */
+export function parseIceServers(raw: string | undefined): CallIceServer[] {
+  if (!raw?.trim()) return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) throw new Error('CALL_ICE_SERVERS muss eine JSON-Liste sein.');
+  return parsed.map((entry) => {
+    const server = entry as Partial<CallIceServer>;
+    const urls = server.urls;
+    const valid =
+      (typeof urls === 'string' && /^(stuns?|turns?):/.test(urls)) ||
+      (Array.isArray(urls) &&
+        urls.every((url) => typeof url === 'string' && /^(stuns?|turns?):/.test(url)));
+    if (!valid)
+      throw new Error('CALL_ICE_SERVERS: jeder Eintrag braucht stun:/turn:-Adressen in „urls“.');
+    return {
+      urls,
+      ...(typeof server.username === 'string' ? { username: server.username } : {}),
+      ...(typeof server.credential === 'string' ? { credential: server.credential } : {}),
+    } as CallIceServer;
+  });
+}

@@ -1,0 +1,290 @@
+import type { MeUser } from '@slider/shared';
+import { useId, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { appHome, usePageApp } from '@/lib/apps';
+import { routes } from '@/lib/routes';
+import { useAuthProviders, useMe, useOtherAccounts } from '@/lib/api';
+import {
+  Avatar,
+  cn,
+  ErrorText,
+  Icon,
+  IconButton,
+  MenuDivider,
+  MenuHeading,
+  MenuItem,
+  PopoverPanel,
+  Toast,
+  useIsNarrow,
+  useToast,
+} from '@/ui';
+import { canManageMembers, ROLE_LABELS, switcherLabel } from '../lib/roles';
+import { useAccountSwitch } from '../hooks/useAccountSwitch';
+import { useActiveWorkspace } from '../hooks/useWorkspace';
+import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
+import { DomainWorkspaceRow } from './DomainWorkspaceRow';
+import { JoinWorkspaceDialog } from './JoinWorkspaceDialog';
+import { HeaderPopover } from './HeaderPopover';
+import { PendingInvites } from './PendingInvites';
+import { WorkspaceMark } from './WorkspaceMark';
+
+/**
+ * Header: current workspace with a menu to switch, invite people to a workspace, open its
+ * settings, found or join another one (behind "Neuer Workspace"), accept pending invites and
+ * join the company workspace of one's domain (BER-148). The workspaces of the other accounts
+ * signed in on this browser follow, each under its account: a click switches to it there.
+ */
+export function WorkspaceSwitcher() {
+  const { data: me } = useMe();
+  const current = useActiveWorkspace();
+  const navigate = useNavigate();
+  // Another workspace opens in the app one is in (Cloud, Sender, Slider …); from a page between
+  // the apps (settings, usage) in Cloud, the family's home.
+  const app = usePageApp() ?? 'cloud';
+  const homeOf = (workspaceId: string) => appHome(app, workspaceId).to;
+  const [dialog, setDialog] = useState<'create' | 'join' | null>(null);
+  const [toast, showToast] = useToast();
+  const workspaces = me?.workspaces ?? [];
+  const invites = me?.pendingInvites ?? [];
+  const company = me?.domainWorkspace ?? null;
+  const canCreate = me?.limits?.canCreateWorkspace ?? true;
+  const desktop = useAuthProviders().data?.desktop ?? false;
+  const others = useOtherAccounts(Boolean(me?.user) && !desktop).data ?? [];
+  const elsewhere = others.filter((other) => other.workspaces.length > 0);
+  const accounts = useAccountSwitch();
+  const user = me?.user;
+  if (!user) return null;
+
+  const label = switcherLabel(current?.name ?? null, invites.length);
+
+  return (
+    <>
+      <HeaderPopover
+        label={label}
+        triggerClassName="flex h-9 max-w-[240px] items-center gap-2 rounded-control pr-2 pl-1.5 text-fg transition-colors hover:bg-hover aria-expanded:bg-hover"
+        trigger={() => (
+          <>
+            {current ? (
+              <WorkspaceMark name={current.name} logoUrl={current.logoUrl} />
+            ) : (
+              <Icon name="folder" size={20} />
+            )}
+            <span className="truncate text-sm font-medium max-sm:hidden">
+              {current?.name ?? 'Workspaces'}
+            </span>
+            {invites.length > 0 && (
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-thumb bg-primary px-1 text-tiny font-semibold text-on-primary">
+                {invites.length}
+              </span>
+            )}
+            <Icon name="expandMore" size={18} className="shrink-0 text-fg-subtle" />
+          </>
+        )}
+      >
+        {(close) => (
+          <>
+            {/* Every account's workspaces scroll as one list: what follows stays in view. */}
+            <div className="flex max-h-[min(420px,55vh)] flex-col overflow-y-auto">
+              {/* With more accounts signed in here: whose these are. */}
+              {others.length > 0 ? (
+                <AccountHeading account={user} />
+              ) : (
+                <MenuHeading>Workspaces</MenuHeading>
+              )}
+              <div className="flex flex-col gap-0.5">
+                {workspaces.map((workspace) => (
+                  // Each row carries its own settings button – and for admins an invite button – so
+                  // every workspace is one click from its management; they sit over the row's
+                  // right edge.
+                  <div key={workspace.id} className="group relative">
+                    <MenuItem
+                      selected={workspace.id === current?.id}
+                      icon={<WorkspaceMark name={workspace.name} logoUrl={workspace.logoUrl} />}
+                      className={cn(
+                        canManageMembers(workspace.role) ? 'pr-[68px]' : 'pr-10',
+                        'group-hover:bg-hover',
+                      )}
+                      onClick={() => {
+                        close();
+                        void navigate(homeOf(workspace.id));
+                      }}
+                    >
+                      <span className="truncate">{workspace.name}</span>
+                      <span className="shrink-0 text-xs text-fg-subtle">
+                        {ROLE_LABELS[workspace.role]}
+                      </span>
+                    </MenuItem>
+                    <div className="absolute top-1/2 right-1 flex -translate-y-1/2 gap-0.5">
+                      {canManageMembers(workspace.role) && (
+                        <IconButton
+                          icon="personAdd"
+                          label={`Mitglieder zu ${workspace.name} einladen`}
+                          variant="subtle"
+                          size="compact"
+                          onClick={() => {
+                            close();
+                            void navigate(routes.workspaceInvites(workspace.id));
+                          }}
+                        />
+                      )}
+                      <IconButton
+                        icon="manageAccounts"
+                        label={`${workspace.name} verwalten`}
+                        variant="subtle"
+                        size="compact"
+                        onClick={() => {
+                          close();
+                          void navigate(routes.workspaceSettings(workspace.id));
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {elsewhere.map((other) => (
+                <div key={other.user.id} className="flex flex-col gap-0.5">
+                  <MenuDivider />
+                  <AccountHeading account={other.user} />
+                  {other.workspaces.map((workspace) => (
+                    <MenuItem
+                      key={workspace.id}
+                      icon={<WorkspaceMark name={workspace.name} logoUrl={workspace.logoUrl} />}
+                      title={`Zu ${other.user.name} wechseln`}
+                      disabled={accounts.busy}
+                      dimDisabled={false}
+                      onClick={() => accounts.switchTo(other.user.id, homeOf(workspace.id))}
+                    >
+                      <span className="truncate">{workspace.name}</span>
+                      <span className="shrink-0 text-xs text-fg-subtle">
+                        {ROLE_LABELS[workspace.role]}
+                      </span>
+                    </MenuItem>
+                  ))}
+                </div>
+              ))}
+            </div>
+            {accounts.error && (
+              <ErrorText role="alert" size="xs" className="px-3 pt-0.5 pb-1.5">
+                {accounts.error}
+              </ErrorText>
+            )}
+            <MenuDivider />
+            <NewWorkspaceFlyout
+              canCreate={canCreate}
+              onPick={(choice) => {
+                close();
+                setDialog(choice);
+              }}
+            />
+            {company && (
+              <>
+                <MenuDivider />
+                <MenuHeading>Deine Firma</MenuHeading>
+                <DomainWorkspaceRow workspace={company} onError={showToast} onJoined={close} />
+              </>
+            )}
+            {invites.length > 0 && (
+              <>
+                <MenuDivider />
+                <MenuHeading>Einladungen</MenuHeading>
+                <PendingInvites invites={invites} onError={showToast} onJoined={close} />
+              </>
+            )}
+          </>
+        )}
+      </HeaderPopover>
+      <CreateWorkspaceDialog open={dialog === 'create'} onClose={() => setDialog(null)} />
+      <JoinWorkspaceDialog open={dialog === 'join'} onClose={() => setDialog(null)} />
+      <Toast toast={toast} />
+      {accounts.dialog}
+    </>
+  );
+}
+
+/**
+ * "Neuer Workspace" as one row: a click folds out the two ways to get one – joining by
+ * invitation first, founding one's own second – beside the menu (below the row on narrow screens,
+ * where there is no room to the side). It closes with the menu, which unmounts it.
+ */
+function NewWorkspaceFlyout({
+  canCreate,
+  onPick,
+}: {
+  canCreate: boolean;
+  onPick: (choice: 'create' | 'join') => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  const beside = !useIsNarrow();
+
+  const choices = (
+    <>
+      <MenuItem icon="link" onClick={() => onPick('join')}>
+        Mit Einladung beitreten
+      </MenuItem>
+      {canCreate ? (
+        <MenuItem icon="add" onClick={() => onPick('create')}>
+          Eigenen erstellen
+        </MenuItem>
+      ) : (
+        // Two own workspaces per account (BER-130) – handing one over doesn't free its slot.
+        <div className="flex items-start gap-2.5 px-2.5 py-1.5 text-body text-fg-subtle">
+          <Icon name="add" size={18} className="shrink-0 opacity-50" />
+          <span className="flex flex-col gap-0.5">
+            <span>Eigenen erstellen</span>
+            <span className="text-xs leading-4">Du hast bereits zwei eigene gegründet.</span>
+          </span>
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <div className="relative">
+      <MenuItem
+        icon="add"
+        aria-expanded={open}
+        aria-controls={panelId}
+        className={cn(open && 'bg-hover')}
+        trailing={
+          <Icon
+            name="chevronRight"
+            size={18}
+            className={cn(
+              'shrink-0 text-fg-subtle transition-transform',
+              open && !beside && 'rotate-90',
+            )}
+          />
+        }
+        onClick={() => setOpen((value) => !value)}
+      >
+        Neuer Workspace
+      </MenuItem>
+      {open &&
+        (beside ? (
+          <PopoverPanel
+            id={panelId}
+            position="none"
+            padding="md"
+            className="absolute -top-1.5 left-full ml-2.5 w-[260px]"
+          >
+            {choices}
+          </PopoverPanel>
+        ) : (
+          <div id={panelId} className="flex flex-col pl-4">
+            {choices}
+          </div>
+        ))}
+    </div>
+  );
+}
+
+/** Over an account's workspaces, with several accounts signed in: its picture and address. */
+function AccountHeading({ account }: { account: Pick<MeUser, 'id' | 'name' | 'email' | 'color'> }) {
+  return (
+    <div className="flex items-center gap-2 px-2.5 pt-1.5 pb-1">
+      <Avatar author={{ ...account, type: 'owner' }} size={20} nativeTitle={false} />
+      <span className="min-w-0 truncate text-xs font-medium text-fg-muted">{account.email}</span>
+    </div>
+  );
+}

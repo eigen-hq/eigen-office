@@ -1,0 +1,445 @@
+name: Release
+
+# What a release builds and puts out, once publish.yml (Publish) has passed every check on its tag:
+# the container image (ghcr.io/eigen-hq/eigen-office) and the desktop apps on the GitHub release
+# with their update feeds – Linux (x64, arm64) always, the Mac (Apple Silicon only) signed once the
+# Apple secrets are set (see the desktop job). Apart from deploy.yml, which waits for the same run:
+# a Mac that fails to notarize keeps nothing from going live, and the server never waits for the
+# apps.
+#
+# Again for a release (e.g. after a fix of this file): Actions → Release → Run workflow with its
+# tag. Runs only in eigen-hq/eigen-office, never in a fork.
+
+on:
+  workflow_run:
+    workflows: [Publish]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and upload again, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+# The release's tag: a workflow_run names it as the head branch of the Publish run (the release
+# event's ref), a manual run as its input – GITHUB_REF_NAME is main in both.
+env:
+  TAG: ${{ github.event.workflow_run.head_branch || inputs.tag }}
+
+concurrency:
+  group: release-${{ github.event.workflow_run.head_branch || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  # The image of the release: each platform built on a runner of its own (arm64 natively – this
+  # job runs on main and sees none of the smoke test's caches from the tag, and QEMU takes long),
+  # pushed by digest, then one tag for both: ghcr.io/eigen-hq/eigen-office:<version>,
+  # :<major.minor> and :latest. The package is created private on its first push: set it public
+  # once (the package's settings on GitHub), or hosts cannot pull it.
+  image:
+    name: Container image ${{ matrix.arch }}
+    if: >-
+      github.repository == 'eigen-hq/eigen-office' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/eigen-hq/eigen-office
+            org.opencontainers.image.version=${{ env.TAG }}
+          outputs: type=image,name=ghcr.io/eigen-hq/eigen-office,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=release-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }}
+      - name: Keep the digest
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${{ steps.build.outputs.digest }}"
+          ls "$RUNNER_TEMP/digests"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          retention-days: 1
+
+  image-tags:
+    name: Container image tags
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: image-digest-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: One tag for both platforms
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          image=ghcr.io/eigen-hq/eigen-office
+          version=${TAG#v}
+          docker buildx imagetools create \
+            -t "$image:$version" -t "$image:${version%.*}" -t "$image:latest" \
+            $(printf "$image@%s " *)
+          docker buildx imagetools inspect "$image:$version"
+
+  # The desktop app (desktop/), each build on a runner of its own system and architecture: the
+  # API's native packages (@napi-rs/canvas) and the bundled bun are per platform. Linux (AppImage,
+  # deb) needs no signing and always goes on the release. The Mac (Apple Silicon only) goes there
+  # only signed with the Developer ID and notarized, with the Apple secrets set here (Settings →
+  # Secrets → Actions); without them it is built unsigned and kept as a workflow artifact.
+  #   CSC_LINK          the Developer ID Application certificate, .p12 as base64
+  #   CSC_KEY_PASSWORD  its password
+  #   APPLE_API_KEY     App Store Connect API key (.p8 contents) for notarization
+  #   APPLE_API_KEY_ID, APPLE_API_ISSUER
+  # Each build brings its own update feed (latest-mac.yml, latest-linux.yml,
+  # latest-linux-arm64.yml), so none has to be merged.
+  desktop:
+    name: Desktop app ${{ matrix.os }} ${{ matrix.arch }}
+    if: >-
+      github.repository == 'eigen-hq/eigen-office' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: mac
+            arch: arm64
+            runner: macos-15
+            targets: dmg zip
+          - os: linux
+            arch: x64
+            runner: ubuntu-24.04
+            targets: AppImage deb
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            targets: AppImage deb
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - name: Build (the Mac signed and notarized when the Apple secrets are set)
+        id: build
+        working-directory: desktop
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          extra=()
+          if [ "${{ matrix.os }}" = linux ]; then
+            unset CSC_LINK CSC_KEY_PASSWORD
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$CSC_LINK" ]; then
+            printf '%s\n' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/notarize.p8"
+            export APPLE_API_KEY="$RUNNER_TEMP/notarize.p8"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            # No Apple certificate: the app gets a signature of its own making (Apple Silicon
+            # starts nothing without one) and goes out as a DMG alone – macOS asks before the
+            # first start („Dennoch öffnen“), and there is no update feed (it installs only
+            # signed ones).
+            unset CSC_LINK CSC_KEY_PASSWORD
+            node scripts/stage.mjs
+            npx electron-builder --mac --dir --arm64 --publish never \
+              -c.extraMetadata.version="${TAG#v}" -c.mac.identity=null
+            codesign --force --deep --sign - dist/mac-arm64/Slider.app
+            codesign --verify --deep --strict dist/mac-arm64/Slider.app
+            npx electron-builder --mac dmg --arm64 --publish never \
+              --prepackaged dist/mac-arm64/Slider.app \
+              -c.extraMetadata.version="${TAG#v}" -c.mac.identity=null
+            rm -f dist/latest*.yml dist/*.zip dist/*.blockmap
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/stage.mjs
+          npx electron-builder --${{ matrix.os }} ${{ matrix.targets }} --${{ matrix.arch }} \
+            --publish never -c.extraMetadata.version="${TAG#v}" "${extra[@]}"
+      - if: steps.build.outputs.signed == 'true'
+        name: Check signature and notarization
+        working-directory: desktop
+        run: |
+          app=$(find dist -maxdepth 2 -name Slider.app | head -1)
+          codesign --verify --deep --strict "$app"
+          spctl --assess --type execute --verbose "$app"
+          xcrun stapler validate "$app"
+      - if: steps.build.outputs.publish == 'true'
+        name: Put the packages and the update feed on the release
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The packages, their blockmaps (updates that load only what changed) and the feed.
+        # (An unsigned Mac has the DMG alone, no feed.)
+        run: >-
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY"
+          $(ls dist/Slider-* dist/latest*.yml 2>/dev/null)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            desktop/dist/Slider-*
+            desktop/dist/latest*.yml
+            !desktop/dist/*.blockmap
+          retention-days: 14
+
+  # „The Office Cloud“, the files app for the desktop: for the Mac a DMG signed by itself (ad hoc,
+  # `desktop/cloud/pack.sh` – macOS asks before the first start, there is no update feed), for
+  # Linux an AppImage and a deb. Signing with an Apple certificate and notarising come later:
+  # that electron-builder leaves the Finder drive's own rights is untried.
+  cloud-desktop:
+    name: Cloud app ${{ matrix.os }} ${{ matrix.arch }}
+    if: >-
+      github.repository == 'eigen-hq/eigen-office' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS 15: the Finder's drive is built against its SDK.
+          - os: mac
+            arch: arm64
+            runner: macos-15
+          - os: linux
+            arch: x64
+            runner: ubuntu-24.04
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - name: Build
+        working-directory: desktop
+        run: |
+          version="${TAG#v}"
+          if [ "${{ matrix.os }}" = mac ]; then
+            CLOUD_VERSION="$version" sh cloud/pack.sh
+          else
+            npx electron-builder --linux AppImage deb --${{ matrix.arch }} --publish never \
+              -c cloud/builder.json -c.extraMetadata.version="$version"
+            rm -f dist/cloud/latest*.yml
+          fi
+      - name: Put the packages on the release
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY"
+          $(ls dist/cloud/Cloud-*.dmg dist/cloud/Cloud-*.AppImage dist/cloud/Cloud-*.deb 2>/dev/null)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloud-desktop-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            desktop/dist/cloud/Cloud-*.dmg
+            desktop/dist/cloud/Cloud-*.AppImage
+            desktop/dist/cloud/Cloud-*.deb
+          retention-days: 14
+
+  # Writer, the documents app for the desktop: a window on the server's Writer, nothing more in
+  # it. For the Mac a DMG signed by itself (ad hoc, as Slider's without an Apple certificate –
+  # macOS asks before the first start, there is no update feed), for Linux an AppImage and a deb.
+  writer-desktop:
+    name: Writer app ${{ matrix.os }} ${{ matrix.arch }}
+    if: >-
+      github.repository == 'eigen-hq/eigen-office' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: mac
+            arch: arm64
+            runner: macos-15
+          - os: linux
+            arch: x64
+            runner: ubuntu-24.04
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - name: Build
+        working-directory: desktop
+        run: |
+          version="${TAG#v}"
+          if [ "${{ matrix.os }}" = mac ]; then
+            # No Apple certificate: a signature of its own making (Apple Silicon starts nothing
+            # without one), then the DMG from that app.
+            npx electron-builder --mac --dir --arm64 --publish never \
+              -c writer/builder.json -c.extraMetadata.version="$version" -c.mac.identity=null
+            codesign --force --deep --sign - dist/writer/mac-arm64/Writer.app
+            codesign --verify --deep --strict dist/writer/mac-arm64/Writer.app
+            npx electron-builder --mac dmg --arm64 --publish never \
+              --prepackaged dist/writer/mac-arm64/Writer.app \
+              -c writer/builder.json -c.extraMetadata.version="$version" -c.mac.identity=null
+          else
+            npx electron-builder --linux AppImage deb --${{ matrix.arch }} --publish never \
+              -c writer/builder.json -c.extraMetadata.version="$version"
+          fi
+          rm -f dist/writer/latest*.yml dist/writer/*.zip dist/writer/*.blockmap
+      - name: Put the packages on the release
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY"
+          $(ls dist/writer/Writer-*.dmg dist/writer/Writer-*.AppImage dist/writer/Writer-*.deb 2>/dev/null)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: writer-desktop-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            desktop/dist/writer/Writer-*.dmg
+            desktop/dist/writer/Writer-*.AppImage
+            desktop/dist/writer/Writer-*.deb
+          retention-days: 14
+
+  # Sender, the messages app for the desktop: a window on the server's Sender that tells by itself
+  # while it runs (no Web Push in it). For the Mac a DMG signed by itself (ad hoc, as Slider's
+  # without an Apple certificate – macOS asks before the first start, there is no update feed),
+  # for Linux an AppImage and a deb.
+  sender-desktop:
+    name: Sender app ${{ matrix.os }} ${{ matrix.arch }}
+    if: >-
+      github.repository == 'eigen-hq/eigen-office' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: mac
+            arch: arm64
+            runner: macos-15
+          - os: linux
+            arch: x64
+            runner: ubuntu-24.04
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: bun install --frozen-lockfile
+        working-directory: desktop
+      - name: Build
+        working-directory: desktop
+        run: |
+          version="${TAG#v}"
+          if [ "${{ matrix.os }}" = mac ]; then
+            # No Apple certificate: a signature of its own making (Apple Silicon starts nothing
+            # without one), then the DMG from that app.
+            npx electron-builder --mac --dir --arm64 --publish never \
+              -c sender/builder.json -c.extraMetadata.version="$version" -c.mac.identity=null
+            codesign --force --deep --sign - dist/sender/mac-arm64/Sender.app
+            codesign --verify --deep --strict dist/sender/mac-arm64/Sender.app
+            npx electron-builder --mac dmg --arm64 --publish never \
+              --prepackaged dist/sender/mac-arm64/Sender.app \
+              -c sender/builder.json -c.extraMetadata.version="$version" -c.mac.identity=null
+          else
+            npx electron-builder --linux AppImage deb --${{ matrix.arch }} --publish never \
+              -c sender/builder.json -c.extraMetadata.version="$version"
+          fi
+          rm -f dist/sender/latest*.yml dist/sender/*.zip dist/sender/*.blockmap
+      - name: Put the packages on the release
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY"
+          $(ls dist/sender/Sender-*.dmg dist/sender/Sender-*.AppImage dist/sender/Sender-*.deb 2>/dev/null)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sender-desktop-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            desktop/dist/sender/Sender-*.dmg
+            desktop/dist/sender/Sender-*.AppImage
+            desktop/dist/sender/Sender-*.deb
+          retention-days: 14

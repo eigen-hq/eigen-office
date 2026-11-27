@@ -1,0 +1,28 @@
+# The website of the office and its apps (https://{$WEBSITE_DOMAIN}/office/, /slider/, /writer/,
+# /solver/, /cloud/) and the personal page at /me/ → the website container. Mounted into the Caddy
+# of deploy/docker-compose.yml by docker-compose.website.yml.
+{$WEBSITE_DOMAIN} {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	# The contact form (/slider/kontakt) posts here: only this one API route, passed to Slider, so
+	# the browser stays on this origin and Slider needs no CORS exception for the website.
+	handle /slider/api/contact {
+		rewrite * /api/contact
+		reverse_proxy slider:8787
+	}
+	# Live comments on the site (stream + posts), also only these routes; Slider keeps nothing.
+	handle /slider/api/site-live* {
+		uri strip_prefix /slider
+		reverse_proxy slider:8787 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	# Everything else is the site's: its pages, the redirect from the root to the office and its
+	# own 404 page for what does not exist.
+	handle {
+		reverse_proxy website:80
+	}
+}

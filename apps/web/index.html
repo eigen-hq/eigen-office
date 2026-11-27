@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <!-- Cloud's, the start page's app: worn until the page names its own (`APP_FILES`, lib/apps.ts). -->
+    <meta name="description" content="Cloud. Dateien, die jeder wiederfindet." />
+    <!-- ?v: browsers keep favicons for long – bump it when the icon changes. -->
+    <link rel="icon" type="image/svg+xml" href="/cloud-favicon.svg" />
+    <!-- The installed app's icon (Dock, home screen), from the Icon Composer PNG export. -->
+    <link rel="apple-touch-icon" href="/cloud-touch-icon.png?v=1" />
+    <link rel="manifest" href="/cloud.webmanifest" />
+    <meta name="theme-color" content="#000000" />
+    <title>Cloud</title>
+    <!-- Before the first paint, so a light theme never flashes dark (no inline scripts: CSP). -->
+    <script src="/theme-init.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

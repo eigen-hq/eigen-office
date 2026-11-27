@@ -1,0 +1,61 @@
+/**
+ * Workspaces, members and invitations (BER-129). In the UI too it is a "Workspace"
+ * (BER-130); its plan limits live in `../plans`.
+ *
+ * - `./roles`: roles, deck permissions, membership lookups (no further service imports)
+ * - `./workspaces`: founding, listing, renaming, logo, deleting
+ * - `./members`: member list, role changes, leaving and removing
+ * - `./departure`: what happens to the decks of someone who goes (BER-165)
+ * - `./invites`: e-mail invites and links, previews, joining
+ * - `./domains`: company workspaces found and joined by e-mail domain (BER-148)
+ * - `./sso`: a workspace's own company login (BER-162)
+ */
+
+export { getRole, requireRole } from './roles';
+export {
+  createWorkspace,
+  deleteWorkspace,
+  ensurePersonalWorkspace,
+  foundWorkspace,
+  getWorkspace,
+  listWorkspaces,
+  PERSONAL_WORKSPACE_NAME,
+  removeWorkspaceLogo,
+  renameWorkspace,
+  resolveUploadWorkspace,
+  setAgentAvatars,
+  setWorkspaceLogo,
+} from './workspaces';
+export { listMembers, removeMember, updateMemberRole } from './members';
+export { deleteDeckFiles, departurePreview } from './departure';
+export {
+  acceptInviteById,
+  createInvite,
+  effectiveState,
+  findInviteByToken,
+  hasPendingEmailInvite,
+  joinByToken,
+  listInvites,
+  pendingInvitesFor,
+  previewInvite,
+  revokeInvite,
+} from './invites';
+export {
+  domainWorkspaceFor,
+  findDomainWorkspace,
+  foundAtSignUp,
+  joinByDomain,
+  setWorkspaceDomain,
+} from './domains';
+export {
+  anyWorkspaceSso,
+  companyLoginRequired,
+  deleteWorkspaceSso,
+  findSsoForEmail,
+  findSsoForWorkspace,
+  getWorkspaceSso,
+  saveWorkspaceSso,
+  setWorkspaceSsoRequired,
+  verifyWorkspaceSso,
+  type ActiveSso,
+} from './sso';

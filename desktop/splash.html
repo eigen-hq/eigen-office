@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'"
+    />
+    <title>Slider</title>
+    <link rel="stylesheet" href="./generated/logo-animations.css" />
+    <style>
+      @font-face {
+        font-family: 'Inter Variable';
+        src: url('./tabbar/inter.woff2') format('woff2');
+        font-weight: 100 900;
+      }
+      :root {
+        color-scheme: dark;
+        --canvas: #000;
+        --fg: rgb(255 255 255 / 0.9);
+        --fg-subtle: rgb(255 255 255 / 0.5);
+      }
+      :root[data-theme='light'] {
+        color-scheme: light;
+        --canvas: #f4f4f5;
+        --fg: rgb(0 0 0 / 0.88);
+        --fg-subtle: rgb(0 0 0 / 0.46);
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--canvas);
+        color: var(--fg);
+        font-family:
+          'Inter Variable',
+          -apple-system,
+          BlinkMacSystemFont,
+          sans-serif;
+        font-feature-settings: 'cv11', 'ss01';
+        -webkit-font-smoothing: antialiased;
+        user-select: none;
+        cursor: default;
+      }
+      body {
+        display: grid;
+        place-items: center;
+      }
+      main {
+        display: grid;
+        justify-items: center;
+        gap: 28px;
+      }
+      /* The app header's word mark (Logo.tsx: mark 24 px, gap 6, 18 px semibold), zoomed – the
+         animations' px are meant at that size. */
+      .logo {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        zoom: 3;
+      }
+      .logo-text {
+        font-size: 18px;
+        line-height: 28px;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+      }
+      .logo-text > span {
+        display: inline-block;
+      }
+      .fill-logo-roll {
+        fill: var(--color-logo-roll);
+      }
+      .stroke-logo-legs {
+        stroke: var(--color-logo-legs);
+      }
+      .fill-logo-screen {
+        fill: var(--color-logo-screen);
+      }
+      .fill-logo-bars {
+        fill: var(--color-logo-bars);
+      }
+      .fill-logo {
+        fill: var(--color-logo);
+      }
+      .stroke-logo-title {
+        stroke: var(--color-logo-title);
+      }
+      .stroke-logo-outline {
+        stroke: var(--color-logo-outline);
+      }
+      #status {
+        margin: 0;
+        min-height: 18px;
+        font-size: 13px;
+        line-height: 18px;
+        color: var(--fg-subtle);
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="logo" role="img" aria-label="Slider">
+        <svg
+          width="24"
+          height="22.2"
+          viewBox="0 0 24.05 22.25"
+          fill="none"
+          aria-hidden="true"
+          data-logo-part="icon"
+        >
+          <g data-logo-part="back">
+            <path
+              d="M10.3774 12.6131L6.0917 21.6607M10.3774 12.6131L14.6631 21.6607M10.3774 12.6131L10.3774 20.7083"
+              class="stroke-logo-legs"
+              stroke-width=".8333"
+              stroke-linecap="round"
+            />
+            <rect
+              x="1.3298"
+              y="1.4226"
+              width="18.0952"
+              height="18.3333"
+              rx="1.1905"
+              class="fill-logo-screen"
+            />
+            <path
+              d="M2.5202 4.0417h1.4286"
+              class="stroke-logo-title"
+              stroke-width=".7143"
+              stroke-linecap="round"
+            />
+            <path
+              d="M2.5202 13.0893h1.9048v5.4762H2.5202ZM5.1393 16.4226h1.9048v2.1429H5.1393ZM7.7583 10.9464h1.9048v7.619H7.7583ZM10.3774 15.2321h1.9048v3.3333h-1.9048ZM12.9964 17.1369h1.9048v1.4286h-1.9048ZM15.6155 9.5179h1.9048v9.0476h-1.9048Z"
+              class="fill-logo-bars"
+            />
+          </g>
+          <g data-logo-part="front">
+            <rect
+              x=".3774"
+              y=".2321"
+              width="20"
+              height="1.6667"
+              rx=".8333"
+              class="fill-logo-roll"
+            />
+          </g>
+          <path
+            d="M9.2726 2.6274h10.2857a4.1143 4.1143 0 0 1 4.1143 4.1143v3.3429a4.1143 4.1143 0 0 1-4.1143 4.1143H6.1869a1.0286 1.0286 0 0 1-1.0286-1.0286V6.7417a4.1143 4.1143 0 0 1 4.1143-4.1143Z"
+            class="fill-logo stroke-logo-outline"
+            stroke-width=".46"
+            data-logo-part="bubble"
+          />
+        </svg>
+        <span class="logo-text" data-logo-part="text">
+          <span aria-hidden="true" style="--i: 0">S</span
+          ><span aria-hidden="true" style="--i: 1">l</span
+          ><span aria-hidden="true" style="--i: 2">i</span
+          ><span aria-hidden="true" style="--i: 3">d</span
+          ><span aria-hidden="true" style="--i: 4">e</span
+          ><span aria-hidden="true" style="--i: 5">r</span>
+        </span>
+      </span>
+      <p id="status"></p>
+    </main>
+    <script src="./generated/logo-animations.js"></script>
+    <script src="./splash.js"></script>
+  </body>
+</html>

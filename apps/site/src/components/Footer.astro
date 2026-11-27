@@ -1,0 +1,95 @@
+---
+import Mark from './Mark.astro';
+import { LANG_NAMES, appPage, localPage, s, t, type Lang } from '~/i18n';
+import { APPS, APP_NAMES } from '~/lib/apps';
+import { APP_URL, BERTRO_URL, CHANGELOG_URL, IMPRINT_URL, page, PRIVACY_URL, REPO_URL } from '~/lib/links';
+
+/** Site / Footer: the office's mark, link columns and the language switch (where the page has versions). */
+interface Props {
+  lang: Lang;
+  versions: { lang: Lang; href: string }[];
+}
+
+const { lang, versions } = Astro.props;
+const words = t(lang);
+const suite = s(lang);
+const columns = [
+  {
+    title: suite.footer.apps,
+    links: [...APPS.map((id) => [APP_NAMES[id], appPage(id, lang)])],
+  },
+  {
+    title: suite.footer.more,
+    links: [
+      // Posts are English only.
+      [suite.footer.blog, localPage(lang, 'blog')],
+      [suite.footer.source, REPO_URL],
+      [suite.footer.changelog, CHANGELOG_URL],
+      [words.nav.login, `${APP_URL}/`],
+    ],
+  },
+  {
+    title: suite.footer.company,
+    links: [
+      [suite.footer.about, BERTRO_URL],
+      [suite.footer.contact, page('kontakt')],
+      ['Impressum', IMPRINT_URL],
+      ['Datenschutz', PRIVACY_URL],
+    ],
+  },
+];
+---
+
+<footer class="mt-40 border-t border-hairline px-4 md:mt-64 md:px-8">
+  <div class="mx-auto grid max-w-[1440px] gap-12 py-12 md:grid-cols-[1.4fr_repeat(3,1fr)] md:py-20">
+    <div class="flex flex-col items-start gap-5">
+      <Mark app="office" size={36} />
+      <p class="text-[26px] leading-[1.15] font-semibold tracking-[-0.02em] text-fg">{suite.footer.tagline}</p>
+      {
+        versions.length > 0 && (
+          <nav aria-label={words.nav.language} class="mt-2 flex gap-4">
+            {versions.map((v) => (
+              <a
+                href={v.href}
+                hreflang={v.lang}
+                lang={v.lang}
+                data-lang={v.lang}
+                aria-current={v.lang === lang ? 'true' : undefined}
+                class:list={['label transition-colors hover:text-fg', v.lang === lang && 'text-fg underline underline-offset-4']}
+              >
+                {LANG_NAMES[v.lang]}
+              </a>
+            ))}
+          </nav>
+        )
+      }
+    </div>
+    {
+      columns.map((column) => (
+        <div class="flex flex-col gap-3">
+          <p class="label mb-1">{column.title}</p>
+          {column.links.map(([label, href]) => (
+            <a href={href} class="w-max text-[15px] text-fg-muted transition-colors hover:text-fg">
+              {label}
+            </a>
+          ))}
+        </div>
+      ))
+    }
+  </div>
+  <div class="mx-auto flex max-w-[1440px] justify-between border-t border-hairline py-6">
+    <p class="label">© 2026 bertro</p>
+    <p class="label">Open source | EUPL-1.2</p>
+  </div>
+</footer>
+
+<script>
+  // A picked language is kept: the next visit to an English page goes straight to it.
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-lang]')) {
+    link.addEventListener('click', () => {
+      try {
+        localStorage.setItem('slider-lang', link.dataset.lang!);
+      } catch {}
+    });
+  }
+</script>

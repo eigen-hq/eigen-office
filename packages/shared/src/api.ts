@@ -1,0 +1,537 @@
+import { z } from 'zod';
+import { meetingNoticeSchema } from './calendar';
+import {
+  accentColorSchema,
+  anchorSchema,
+  commentReactionKindSchema,
+  commentStatusSchema,
+  customColorsSchema,
+  MAX_MEDIA_PEAKS,
+  mediaKindSchema,
+  pathStrokeSchema,
+  AROUND_SLIDE,
+  aroundPointSchema,
+  aroundRectSchema,
+  shapeRefSchema,
+  strokeSchema,
+  type Viewer,
+  type WorkspaceRole,
+} from './model';
+import type { MailCheckFailure } from './mail';
+import type { DomainWorkspace, MeLimits, MeUser, PendingInvite, Workspace } from './workspaces';
+
+/**
+ * HTTP contract between `apps/web` and `apps/api`.
+ * Every route is prefixed with `/api`. Errors always use {@link ApiError}.
+ *
+ * | Method | Path                                   | Body                       | Response              |
+ * |--------|----------------------------------------|----------------------------|-----------------------|
+ * | GET    | /me                                    |                            | MeResponse (401 signed out) |
+ * | PATCH  | /me                                    | UpdateMeInput              | MeResponse            |
+ * | GET    | /decks?workspaceId=                    | (omit: all my workspaces)  | Deck[]                |
+ * | POST   | /decks/upload  (multipart `file`, optional `workspaceId`) |         | Deck (201)            |
+ * | POST   | /decks/link                            | ImportLinkInput            | Deck (201) / ApiError |
+ * | GET    | /decks/:deckId                         |                            | Deck                  |
+ * | PATCH  | /decks/:deckId                         | UpdateDeckInput            | Deck                  |
+ * | DELETE | /decks/:deckId                         |                            | 204                   |
+ * | GET    | /decks/:deckId/slides                  |                            | Slide[]               |
+ * | GET    | /decks/:deckId/status                  |                            | DeckStatus (poll)     |
+ * | POST   | /decks/:deckId/sync                    |                            | SyncResult            |
+ * | GET    | /decks/:deckId/revisions               |                            | Revision[] (newest first) |
+ * | POST   | /decks/:deckId/revisions (multipart `file`, uploads only) |         | SyncResult            |
+ * | GET    | /decks/:deckId/revisions/:revisionId/diff (`latest` ok) |           | RevisionDiff          |
+ * | GET    | /decks/:deckId/deleted-slides          |                            | DeletedSlide[]        |
+ * | GET    | /decks/:deckId/comments                |                            | Comment[] (flat)      |
+ * | POST   | /decks/:deckId/comments                | CreateCommentInput         | Comment (201)         |
+ * | PATCH  | /comments/:commentId                   | UpdateCommentInput         | Comment               |
+ * | DELETE | /comments/:commentId                   |                            | 204                   |
+ * | PUT    | /comments/:commentId/reaction          | SetCommentReactionInput    | Comment               |
+ * | PUT    | /decks/:deckId/ai/proposals/:proposalId/reaction | SetCommentReactionInput | CommentReaction[] |
+ * | PUT    | /comments/:commentId/recording (multipart `file` + `comment` JSON, author only) | SetCommentRecordingInput | Comment |
+ * | POST   | /decks/:deckId/media-comments (multipart `file` and/or `image` + `comment` JSON) | CreateMediaCommentInput | Comment (201) |
+ * | GET    | /decks/:deckId/media-usage             |                            | MediaUsage            |
+ * | GET    | /media/:mediaId                        | (Range supported)          | audio/video/PNG bytes |
+ * | GET    | /nextcloud/settings                    |                            | NextcloudSettings     |
+ * | POST   | /nextcloud/login                       | StartNextcloudLoginInput   | NextcloudLoginStart   |
+ * | POST   | /nextcloud/login/:id/poll              |                            | NextcloudLoginPoll    |
+ * | GET    | /nextcloud/:connectionId/files?path=   |                            | NextcloudListing      |
+ * | GET    | /nextcloud/:connectionId/shared        |                            | NextcloudListing      |
+ * | GET    | /nextcloud/:connectionId/search?q=     |                            | NextcloudListing      |
+ * | GET    | /nextcloud/:connectionId/preview/:fileId |                          | image bytes           |
+ * | POST   | /decks/nextcloud-item                  | ImportNextcloudItemInput   | Deck (201)            |
+ * | GET    | /auth/providers                        |                            | AuthProviders         |
+ * | GET    | /auth/microsoft/login?returnTo=&intent= | (signed in: link to me) | 302 to Microsoft |
+ * | GET    | /auth/microsoft/callback               |                            | 302 back to the web app |
+ * | GET    | /auth/google/login?returnTo=&intent=   | (`intent=connect`: link to me) | 302 to Google    |
+ * | GET    | /auth/google/callback                  |                            | 302 back to the web app |
+ * | GET    | /auth/oidc/login?returnTo=&intent=     | (`intent=connect`: link to me) | 302 to the SSO provider |
+ * | GET    | /auth/oidc/callback                    |                            | 302 back to the web app |
+ * | POST   | /auth/sso/discover                     | DiscoverSsoInput           | SsoLogin (404: none for the address) |
+ * | GET    | /auth/sso/login?workspace=&returnTo= | (a workspace's company login) | 302 to its provider |
+ * | GET    | /auth/sso/callback                     |                            | 302 back to the web app |
+ * | GET    | /auth/nextcloud/login?returnTo=&intent= | (the organisation's Nextcloud, OAuth 2.0) | 302 to Nextcloud |
+ * | GET    | /auth/nextcloud/callback               |                            | 302 back to the web app |
+ * | POST   | /auth/nextcloud/flow                   | StartNextcloudSignInInput  | NextcloudLoginStart (sets cookie) |
+ * | POST   | /auth/nextcloud/flow/:id/poll          |                            | NextcloudSignInPoll   |
+ * | POST   | /auth/nextcloud/confirm                | ConfirmNextcloudSignUpInput | LoginResult (sets cookie) |
+ * | POST   | /auth/email/start                      | StartEmailLoginInput       | 204 (mails a login link) |
+ * | POST   | /auth/email/confirm                    | ConfirmEmailLoginInput     | EmailLoginResult (sets cookie) |
+ * | POST   | /auth/email/code                       | EmailLoginCodeInput        | EmailLoginResult (sets cookie) |
+ * | POST   | /auth/passkey/options                  |                            | WebAuthn request options |
+ * | POST   | /auth/passkey/verify                   | VerifyPasskeyLoginInput    | LoginResult (sets cookie) |
+ * | GET    | /me/nextcloud                          |                            | NextcloudConnection[] |
+ * | DELETE | /me/nextcloud/:id                      | (revokes the app password at Nextcloud) | DisconnectNextcloudResult |
+ * | GET    | /me/identities                         |                            | LoginIdentity[]       |
+ * | GET    | /passkeys                              |                            | Passkey[]             |
+ * | POST   | /passkeys/register/options             |                            | WebAuthn creation options |
+ * | POST   | /passkeys/register/verify              | VerifyPasskeyRegistrationInput | Passkey (201)     |
+ * | PATCH  | /passkeys/:id                          | RenamePasskeyInput         | Passkey               |
+ * | DELETE | /passkeys/:id                          |                            | 204                   |
+ * | POST   | /auth/logout                           |                            | 204 (signs every account on this browser out) |
+ * | GET    | /auth/accounts                         |                            | SignedInAccount[] (the others on this browser) |
+ * | POST   | /auth/accounts/switch                  | SwitchAccountInput         | 204 (sets cookie)     |
+ * | POST   | /auth/accounts/logout                  | –                          | 204 (the account in use; the next takes over) |
+ * | GET    | /workspaces                            |                            | Workspace[]           |
+ * | POST   | /workspaces                            | CreateWorkspaceInput       | Workspace (201)       |
+ * | GET    | /workspaces/:id                        |                            | Workspace             |
+ * | PATCH  | /workspaces/:id                        | UpdateWorkspaceInput       | Workspace (admin+)    |
+ * | DELETE | /workspaces/:id                        |                            | 204 (owner)           |
+ * | PUT    | /workspaces/:id/logo                   | multipart `file` (PNG/JPEG/WebP) | Workspace (admin) |
+ * | DELETE | /workspaces/:id/logo                   |                            | Workspace (admin)     |
+ * | PUT    | /workspaces/:id/domain                 | UpdateWorkspaceDomainInput | Workspace (admin)     |
+ * | PUT    | /workspaces/:id/agent-avatars          | UpdateAgentAvatarsInput    | Workspace (admin)     |
+ * | POST   | /workspaces/:id/domain-join            |                            | JoinResult            |
+ * | GET    | /workspaces/:id/sso                    |                            | WorkspaceSso (admin)  |
+ * | PUT    | /workspaces/:id/sso                    | UpdateWorkspaceSsoInput    | WorkspaceSso (admin)  |
+ * | POST   | /workspaces/:id/sso/verify             | (checks the DNS TXT record) | WorkspaceSso (admin) |
+ * | DELETE | /workspaces/:id/sso                    |                            | 204 (admin)           |
+ * | GET    | /workspaces/:id/usage                  |                            | WorkspaceUsageDetails (members) |
+ * | POST   | /workspaces/:id/billing/checkout       |                            | BillingRedirect (billing owner) |
+ * | POST   | /workspaces/:id/billing/portal         |                            | BillingRedirect (billing owner) |
+ * | POST   | /workspaces/:id/billing/transfer       | BillingTransferInput       | WorkspaceUsageDetails (billing owner) |
+ * | DELETE | /workspaces/:id/billing/transfer       |                            | WorkspaceUsageDetails (owner or asked admin) |
+ * | POST   | /workspaces/:id/billing/transfer/accept |                           | BillingTransferAcceptResult (asked admin) |
+ * | POST   | /billing/webhook                       | Stripe event (signed)      | 200                   |
+ * | GET    | /workspaces/:id/members                |                            | WorkspaceMember[]     |
+ * | PATCH  | /workspaces/:id/members/:userId        | UpdateMemberInput          | WorkspaceMember       |
+ * | DELETE | /workspaces/:id/members/:userId        | ?successor=<userId>        | 204 (admin+ or self)  |
+ * | GET    | /workspaces/:id/members/:userId/departure | ?successor=<userId>     | MemberDeparture (admin+ or self) |
+ * | GET    | /workspaces/:id/invites                |                            | WorkspaceInvite[]     |
+ * | POST   | /workspaces/:id/invites                | CreateWorkspaceInviteInput | CreatedWorkspaceInvite (201) |
+ * | DELETE | /workspace-invites/:inviteId           |                            | 204 (revokes)         |
+ * | POST   | /workspace-invites/:inviteId/accept    |                            | JoinResult            |
+ * | GET    | /join/:token                           |                            | JoinPreview (public)  |
+ * | POST   | /join/:token                           |                            | JoinResult            |
+ *
+ * Binary files (slide images, thumbnails, avatars) are served from `/files/*`.
+ */
+
+export const API_PREFIX = '/api';
+
+/**
+ * The account a page was loaded for (its user id), sent with its requests. A browser holds
+ * several accounts and one is in use: switched in another tab, or handed over when a session
+ * ended, a page still open would write as the wrong one – the server answers `account_changed`
+ * (409) instead, and the page starts over.
+ */
+export const ACCOUNT_HEADER = 'x-slider-account';
+
+export const ERROR_CODES = [
+  'bad_request',
+  'not_found',
+  'forbidden',
+  'unauthorized',
+  /** The browser is on another account than the page asking (`ACCOUNT_HEADER`). */
+  'account_changed',
+  'unsupported_link',
+  /** The Microsoft login is not set up on this server. */
+  'microsoft_not_configured',
+  /** The file needs a connected Nextcloud account at `nextcloudServer` (BER-135). */
+  'nextcloud_login_required',
+  'source_forbidden',
+  'source_not_found',
+  'source_unreachable',
+  'not_a_powerpoint',
+  'file_too_large',
+  'quota_exceeded',
+  'unsupported_media',
+  'link_revoked',
+  'link_expired',
+  'invite_used',
+  'rate_limited',
+  /** A limit of the workspace's plan (members, decks, own workspaces) is reached (BER-130). */
+  'plan_limit',
+  /**
+   * The workspace is on the free plan and over one of its limits (members, reviews, storage):
+   * reading, deleting and upgrading work, creating does not until it fits again (BER-155).
+   */
+  'plan_over_limit',
+  /** Older versions' files can't be deleted while a version is imported or rendered. */
+  'storage_busy',
+  /** The source's file changed, but the deck was edited in Slider: pulling would drop the edits. */
+  'edit_conflict',
+  /** The workspace has no (working) Anthropic API key for its AI (BER-183). */
+  'ai_not_configured',
+  /** Neither a key for speech to text nor the server's own Whisper for the workspace. */
+  'speech_not_configured',
+  /**
+   * No instance admin yet: a signed-in account has to enter the setup token from the server log
+   * first (`POST /setup/claim`); until then every other route answers with this (403).
+   */
+  'instance_unclaimed',
+  /** Another workspace is already opened to this e-mail domain (BER-148). */
+  'domain_taken',
+  /** The website's contact form is off: no `CONTACT_EMAIL` or no SMTP. */
+  'contact_unavailable',
+  /** A mail (the login link, BER-168) could not be sent just now; trying again may work. */
+  'mail_failed',
+  /** The instance admin blocked the workspace (BER-167): only leaving it still works. */
+  'workspace_blocked',
+  /** The instance admin blocked the account (BER-167): it can't sign in. */
+  'account_blocked',
+  /** The address's workspace allows its company login alone („Nur Firmen-Login“). */
+  'sso_required',
+  /** Deleting the account needs a fresh sign-in: sign out and in again first. */
+  'reauth_required',
+  /**
+   * An edit names another account than the one signed in (signed in anew in another tab before
+   * this one heard of it): refused, kept by the editor for its account.
+   */
+  'account_changed',
+  /** The desktop's sign-in code is expired, taken or not for this verifier (BER-201). */
+  'invalid_code',
+  /** The desktop app could not reach its Slider server, or it refused the sign-in. */
+  'cloud_unreachable',
+  'cloud_refused',
+  /** Cloud: the file changed since the version a computer's change was made on. */
+  'cloud_conflict',
+  /**
+   * „Verbindungen“: the address answered as no MCP server, or not at all – the page then offers
+   * it as an API or opens an agent that helps.
+   */
+  'connection_failed',
+  'internal',
+] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+export interface ApiError {
+  error: {
+    code: ErrorCode;
+    message: string;
+    /** With `nextcloud_login_required`: the Nextcloud to connect (`POST /nextcloud/login`). */
+    nextcloudServer?: string;
+    /** A mailbox not let in: the step where it stopped and what the server said. */
+    mailCheck?: MailCheckFailure;
+  };
+}
+
+/** Upload limit from BER-91. */
+export const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+
+/**
+ * Deck files from this size go up in parts over tus (`POST /api/decks/tus`), each part well
+ * under a proxy's limit per request (Cloudflare: 100 MB). Smaller ones take one request.
+ */
+export const DECK_UPLOAD_IN_PARTS_FROM = 64 * 1024 * 1024;
+export const DECK_UPLOAD_PART_BYTES = 32 * 1024 * 1024;
+/** Where tus uploads of deck files begin (under `API_PREFIX`). */
+export const DECK_TUS_PATH = '/decks/tus';
+
+export interface MeResponse {
+  viewer: Viewer;
+  /** Absent only if the account vanished mid-request. */
+  user?: MeUser;
+  workspaces?: Workspace[];
+  pendingInvites?: PendingInvite[];
+  /** The company workspace of the viewer's e-mail domain, if they are not in it (BER-148). */
+  domainWorkspace?: DomainWorkspace | null;
+  /** What the account may still do (BER-130), e.g. found its own workspace. */
+  limits?: MeLimits;
+  /**
+   * `false`: the instance has no admin yet and this account must enter the setup token
+   * (`POST /setup/claim`) before anything else – every other route answers `instance_unclaimed`.
+   * Always `true` for the dev owner of the dev login (development without a login).
+   */
+  instanceClaimed: boolean;
+  /** The release the server runs (`SLIDER_VERSION`, e.g. `1.6.3`); `null` from a checkout. */
+  version?: string | null;
+}
+
+/** Longest name a person can give themselves (`PATCH /me`). */
+export const USER_NAME_MAX = 80;
+
+/**
+ * The viewer's own settings: their accent colour (pins, lines, drawings), the name others see
+ * (BER-145: people correct it themselves) and whether Cloud's file names show their ending. Any of
+ * them.
+ */
+export const updateMeInputSchema = z
+  .object({
+    color: accentColorSchema.optional(),
+    name: z.string().trim().min(1, 'Der Name darf nicht leer sein.').max(USER_NAME_MAX).optional(),
+    showExtensions: z.boolean().optional(),
+    /** Einstellungen › Kalender: minutes before a meeting it shows in the header; `null`: never. */
+    meetingNoticeMinutes: meetingNoticeSchema.optional(),
+  })
+  .refine(
+    (input) =>
+      input.color !== undefined ||
+      input.name !== undefined ||
+      input.showExtensions !== undefined ||
+      input.meetingNoticeMinutes !== undefined,
+    { message: 'Nichts zu ändern.' },
+  );
+export type UpdateMeInput = z.infer<typeof updateMeInputSchema>;
+
+/**
+ * Privacy policy and imprint of the instance (BER-141): Markdown kept by the instance admin,
+ * shown at `/datenschutz` and `/impressum` and linked from every public page and mail.
+ * `null`: not written yet – then the links are hidden.
+ */
+export interface LegalTexts {
+  privacy: string | null;
+  imprint: string | null;
+  /**
+   * What the templates were last filled with – the form's fields and switches – so a newer
+   * template is filled again without typing („Vorlage aktualisieren“). Only what the texts
+   * print anyway. `null`: written by hand or before the form remembered.
+   */
+  template: LegalTemplateInput | null;
+}
+
+export const legalTemplateSchema = z.object({
+  values: z.record(z.string().max(60), z.string().max(400)),
+  options: z.record(z.string().max(60), z.boolean()),
+});
+export type LegalTemplateInput = z.infer<typeof legalTemplateSchema>;
+
+const legalTextSchema = z
+  .string()
+  .max(100_000)
+  .nullable()
+  .transform((text) => (text?.trim() ? text : null));
+export const updateLegalTextsInputSchema = z.object({
+  privacy: legalTextSchema,
+  imprint: legalTextSchema,
+  /** Left out: what was remembered stays. */
+  template: legalTemplateSchema.nullable().optional(),
+});
+export type UpdateLegalTextsInput = z.input<typeof updateLegalTextsInputSchema>;
+
+/**
+ * Data requests without login (BER-146): someone enters their address on `/datenanfrage`, Slider
+ * mails a link to exactly that address – having the mailbox is the proof of identity. The link
+ * (`/daten/:token`) downloads the copy or confirms the deletion; `keep` comes from the reminder
+ * mails of unused accounts (BER-147) and keeps the account.
+ */
+export const DATA_REQUEST_PURPOSES = ['export', 'delete', 'keep'] as const;
+export type DataRequestPurpose = (typeof DATA_REQUEST_PURPOSES)[number];
+
+export const createDataRequestInputSchema = z.object({
+  email: z.email('Bitte eine gültige E-Mail-Adresse eingeben.').max(320),
+  purpose: z.enum(['export', 'delete']),
+});
+export type CreateDataRequestInput = z.infer<typeof createDataRequestInputSchema>;
+
+/**
+ * The website's contact form (`POST /contact`): mailed to `CONTACT_EMAIL`, a reply goes to
+ * `email`. `website` is a field people never see – only bots fill it in.
+ */
+export const contactMessageInputSchema = z.object({
+  name: z.string().trim().max(200).optional(),
+  email: z.email('Bitte eine gültige E-Mail-Adresse eingeben.').max(320),
+  message: z.string().trim().min(1, 'Bitte eine Nachricht eingeben.').max(5000),
+  website: z.string().max(500).optional(),
+});
+export type ContactMessageInput = z.infer<typeof contactMessageInputSchema>;
+
+/** What a data request link leads to (`GET /data-requests/:token`). */
+export interface DataRequestInfo {
+  purpose: DataRequestPurpose;
+  email: string;
+  /** `false`: no account, only invitations to the address. */
+  hasAccount: boolean;
+  expiresAt: string;
+}
+
+/**
+ * Who becomes admin, per workspace where the deleted account was the only admin among others
+ * (workspace id → member id). Deleting oneself asks for one each (BER-145).
+ */
+export const successorsSchema = z.record(z.string().max(100), z.string().max(100)).default({});
+
+/** A workspace that needs a new admin before the account can be deleted. */
+export interface SuccessorChoice {
+  workspaceId: string;
+  workspaceName: string;
+  /** Other members, highest role first, then longest-standing. */
+  candidates: { userId: string; name: string; role: WorkspaceRole }[];
+}
+
+export const confirmDataDeletionInputSchema = z.object({ successors: successorsSchema });
+export type ConfirmDataDeletionInput = z.infer<typeof confirmDataDeletionInputSchema>;
+
+/**
+ * Deleting an account (`DELETE /me`, BER-145): the person types their e-mail address to confirm,
+ * so a stray click or a stolen session in an open tab can't delete it in one go.
+ */
+export const deleteAccountInputSchema = z.object({
+  confirmEmail: z.string().max(320),
+  successors: successorsSchema,
+});
+export type DeleteAccountInput = z.infer<typeof deleteAccountInputSchema>;
+
+export const importLinkInputSchema = z.object({ url: z.url() });
+export type ImportLinkInput = z.infer<typeof importLinkInputSchema>;
+
+export const updateDeckInputSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    archived: z.boolean(),
+    /** Moves the deck into a folder of its workspace; `null` takes it out. */
+    folderId: z.string().max(100).nullable(),
+    /** Its own colours beside its template's („Eigene“), in their order. */
+    customColors: customColorsSchema,
+  })
+  .partial();
+export type UpdateDeckInput = z.infer<typeof updateDeckInputSchema>;
+
+export const deckFolderInputSchema = z.object({ name: z.string().trim().min(1).max(80) });
+export type DeckFolderInput = z.infer<typeof deckFolderInputSchema>;
+
+/** Longest comment text; the comment fields stop there too. */
+export const MAX_COMMENT_BODY_LENGTH = 10_000;
+
+/** Strokes one comment can carry – also a freehand drawing drawn on stroke by stroke. */
+export const MAX_DRAWING_STROKES = 50;
+
+export const createCommentInputSchema = z.object({
+  /**
+   * Made by the browser (a UUID), so a comment written offline is known by its id before the
+   * server has it – replies, edits and deletes queued after it name it. Sent again (an answer
+   * lost on the way), the comment already saved under it is the answer: never a second one.
+   */
+  id: z.uuid().optional(),
+  slideId: z.string().nullable(),
+  parentId: z.string().nullable().default(null),
+  body: z.string().trim().max(MAX_COMMENT_BODY_LENGTH),
+  anchor: anchorSchema,
+  strokes: z.array(strokeSchema).max(MAX_DRAWING_STROKES).default([]),
+});
+export type CreateCommentInput = z.input<typeof createCommentInputSchema>;
+
+// ── Voice and video comments (BER-116) ─────────────────────────────────────
+
+/** Recordings stop by themselves after five minutes. */
+export const MAX_MEDIA_DURATION_MS = 5 * 60_000;
+/**
+ * Per recording. Five minutes of a screen recording (1080p, 2.5 Mbit/s) are ~95 MB; this leaves
+ * room. From `DECK_UPLOAD_IN_PARTS_FROM` a recording goes up in parts over tus, like a deck.
+ */
+export const MAX_MEDIA_BYTES = 512 * 1024 * 1024;
+
+/** What browsers' MediaRecorder produces: WebM/Opus (Chrome, Firefox), MP4/AAC (Safari), Ogg. */
+export const MEDIA_MIME_TYPES = {
+  audio: ['audio/webm', 'audio/ogg', 'audio/mp4'],
+  video: ['video/webm', 'video/mp4'],
+} as const;
+
+/** A drawn image (PNG from the composer's canvas); a full-screen sketch is well below this. */
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/** Images one comment can carry (pasted or picked, BER-174). */
+export const MAX_COMMENT_IMAGES = 10;
+
+/** `audio/webm;codecs=opus` → `audio/webm`. */
+export const baseMimeType = (mimeType: string) => mimeType.split(';')[0]!.trim().toLowerCase();
+
+export const isAllowedMediaMimeType = (kind: 'audio' | 'video', mimeType: string) =>
+  (MEDIA_MIME_TYPES[kind] as readonly string[]).includes(baseMimeType(mimeType));
+
+/**
+ * The `comment` field of the multipart upload; the recording goes in `file`, a drawn image in
+ * `image`. `media` describes the recording – present exactly when `file` is sent.
+ */
+/** What the upload says about its recording; the bytes go in `file`. */
+const recordingInfoSchema = z.object({
+  kind: mediaKindSchema,
+  // A little slack: the recorder stops on a timer, the container may report a few ms more.
+  durationMs: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_MEDIA_DURATION_MS + 5_000),
+  peaks: z.array(z.number().min(0).max(1)).max(MAX_MEDIA_PEAKS).default([]),
+});
+
+export const createMediaCommentInputSchema = createCommentInputSchema.extend({
+  media: recordingInfoSchema.optional(),
+});
+export type CreateMediaCommentInput = z.input<typeof createMediaCommentInputSchema>;
+
+/**
+ * The `comment` field when editing a comment with a new recording (multipart, the recording in
+ * `file`): it replaces the comment's recording, `body` its text – may go empty, it is the note.
+ */
+export const setCommentRecordingInputSchema = z.object({
+  body: z.string().trim().max(MAX_COMMENT_BODY_LENGTH),
+  media: recordingInfoSchema,
+});
+export type SetCommentRecordingInput = z.input<typeof setCommentRecordingInputSchema>;
+
+/** Storage of the deck's workspace (BER-151): every file of its reviews counts. */
+export interface MediaUsage {
+  usedBytes: number;
+  /** `null` = unlimited (self-hosted). */
+  limitBytes: number | null;
+}
+
+export const updateCommentInputSchema = z
+  .object({
+    /**
+     * May go empty when the comment keeps other content – a recording, an image or a drawing;
+     * the API checks that (a text-only comment needs text).
+     */
+    body: z.string().trim().max(MAX_COMMENT_BODY_LENGTH),
+    status: commentStatusSchema,
+    /** Moves / resizes the comment's text on the slide ("Text auf Folie"); author only. */
+    textBox: aroundRectSchema
+      .refine((box) => box.w > 0 && box.h > 0, { message: 'Das Textfeld braucht eine Größe.' })
+      .refine((box) => box.w <= 1 && box.h <= 1, {
+        message: 'Das Textfeld ist größer als die Folie.',
+      }),
+    /** Moves / resizes the comment's box on the slide; author only, rect anchors only. */
+    anchor: z.object({
+      type: z.literal('rect'),
+      rect: aroundRectSchema.refine((box) => box.w > 0 && box.h > 0, {
+        message: 'Die Box braucht eine Größe.',
+      }),
+      shapeRef: shapeRefSchema.nullable(),
+    }),
+    /** Moves a drawing (strokes and anchor) or a pin by this shift – off the slide too; author only. */
+    move: z.object({
+      dx: z.number().min(-AROUND_SLIDE.size).max(AROUND_SLIDE.size),
+      dy: z.number().min(-AROUND_SLIDE.size).max(AROUND_SLIDE.size),
+    }),
+    /**
+     * Removes the comment's drawing / text on the slide, the comment stays; author only. `pin`:
+     * where its point goes when its box was that drawing or text, else `null` (the anchor stays).
+     */
+    removeMarks: z.object({ pin: aroundPointSchema.nullable() }),
+    /**
+     * Adds freehand strokes to one's own bare freehand drawing – drawn on without a comment in
+     * between, they make one drawing. `rect`: the bounds of all its strokes, the new anchor box.
+     */
+    addStrokes: z.object({
+      strokes: z.array(pathStrokeSchema).min(1).max(MAX_DRAWING_STROKES),
+      rect: aroundRectSchema,
+    }),
+  })
+  .partial();
+export type UpdateCommentInput = z.infer<typeof updateCommentInputSchema>;
+
+/** One's own reaction to a comment or to an answer of the AI; `null` takes it back. */
+export const setCommentReactionInputSchema = z.object({
+  kind: commentReactionKindSchema.nullable(),
+});
+export type SetCommentReactionInput = z.infer<typeof setCommentReactionInputSchema>;

@@ -1,0 +1,806 @@
+import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+import { existsSync, rmSync } from 'node:fs';
+import { access, constants, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { OdpDocument, isOdpBytes, type EmbeddedFont } from '@slider/odp';
+import { withoutExternalLinks } from '@slider/pptx';
+import JSZip from 'jszip';
+import {
+  OFFICE_FONT_SUBSTITUTES,
+  inflateEntry,
+  officeFontFor,
+  zipEntriesAtMost,
+} from '@slider/shared';
+import type { Logger } from '../logger';
+import { isPdfBytes } from '../sources/safe-fetch';
+import { PoolUnavailable, type OfficePool, type PoolPriority } from './office-pool';
+
+/**
+ * A PPTX (or ODP, BER-177) turned into a PDF by an office suite (LibreOffice), for uploads
+ * (BER-94). `pages`, when present, draws only some slides of an ODP – what an edit changed:
+ * 1-based positions in the file, hidden slides counted (as LibreOffice's page range counts
+ * them); ask for visible slides only, a hidden one is not drawn. `priority`: someone waits for it
+ * on screen (`interactive`, the default) or it is drawn ahead (`background`) – with the render
+ * pool, the first go first.
+ */
+export type PptxToPdf = ((
+  pptx: Uint8Array,
+  options?: {
+    /** The workspace's own fonts: drawn in them where the deck names them. */
+    fonts?: readonly EmbeddedFont[];
+    /** `background` (a re-render, a sync) waits for every `interactive` conversion (an upload). */
+    priority?: PoolPriority;
+  },
+) => Promise<Uint8Array>) & {
+  pages?: (
+    deck: Uint8Array,
+    pages: readonly number[],
+    options?: {
+      priority?: PoolPriority;
+      key?: string;
+      /**
+       * The deck is already as LibreOffice is to draw it (`OdpDocument.toDrawingBytes`, the
+       * workspace's fonts embedded).
+       */
+      prepared?: boolean;
+      /** The workspace's own fonts, for a deck not prepared yet. */
+      fonts?: readonly EmbeddedFont[];
+    },
+  ) => Promise<Uint8Array>;
+  /** A drawing asked for ahead (`key`) is now waited for: it goes first (render pool only). */
+  promote?: (key: string) => void;
+};
+
+/** Documents LibreOffice turns into a review deck: Word, Excel, PowerPoint variants and text. */
+export type OfficeDocumentKind = keyof typeof DOCUMENT_IMPORT_FILTERS;
+
+/** Any other document as a PDF, for files picked in a cloud that are no deck yet. */
+export type DocumentToPdf = (
+  bytes: Uint8Array,
+  kind: OfficeDocumentKind,
+  /** `background`: nobody waits for it (Cloud's small pictures) – after every `interactive` one. */
+  priority?: PoolPriority,
+) => Promise<Uint8Array>;
+
+/** A conversion that takes longer is killed; the slides keep their SVG preview. */
+export const LIBREOFFICE_TIMEOUT_MS = 120_000;
+
+/** LibreOffice's import filter for .pptx (OOXML presentations). */
+const PPTX_IMPORT_FILTER = 'Impress MS PowerPoint 2007 XML';
+/** … and for .odp, its own format. */
+const ODP_IMPORT_FILTER = 'impress8';
+
+/** The PDF export of only some pages (LibreOffice's `PageRange` filter option). */
+const pdfOfPages = (pages: readonly number[]) =>
+  `pdf:impress_pdf_Export:${JSON.stringify({ PageRange: { type: 'string', value: pages.join(',') } })}`;
+
+/** An ODP without links LibreOffice could follow (Slider stores them so; this is the second line). */
+async function withoutOdpLinks(odp: Uint8Array): Promise<Uint8Array> {
+  const document = await OdpDocument.open(odp);
+  return document.removeExternalLinks() > 0 ? document.toBytes() : odp;
+}
+
+/**
+ * What LibreOffice draws a font as: the same pairs as its replacement table
+ * ({@link fontReplacements}) – but a family the workspace has fonts of (`own`) stays itself.
+ */
+export function fontSubstituteFor(
+  own: readonly { family: string }[] = [],
+): (family: string) => string | null {
+  const kept = new Set(own.map((font) => font.family.toLowerCase()));
+  return (family) => {
+    if (kept.has(family.toLowerCase())) return null;
+    const substitute = OFFICE_FONT_SUBSTITUTES[family] ?? officeFontFor(family);
+    return substitute && substitute !== family ? substitute : null;
+  };
+}
+
+/**
+ * An ODP as an edit is drawn: without links, and its fonts named by what LibreOffice's
+ * replacement table would draw them as – the render pool's LibreOffice keeps one profile for
+ * every deck, so the deck's own pairs go into the file.
+ */
+async function odpForDrawing(
+  odp: Uint8Array,
+  fonts: readonly EmbeddedFont[] = [],
+): Promise<Uint8Array> {
+  const document = await OdpDocument.open(odp);
+  const changed =
+    document.removeExternalLinks() +
+    document.embedFonts(fonts) +
+    document.replaceFonts(fontSubstituteFor(fonts));
+  return changed > 0 ? document.toBytes() : odp;
+}
+
+/**
+ * The documents {@link createLibreOfficeDocumentPdf} takes, by extension, with the one import
+ * filter each is read with. Office Open XML only (its external links can be dropped before
+ * LibreOffice sees it) and plain text – no format LibreOffice could be made to fetch from.
+ */
+export const DOCUMENT_IMPORT_FILTERS = {
+  docx: 'MS Word 2007 XML',
+  docm: 'MS Word 2007 XML VBA',
+  xlsx: 'Calc MS Excel 2007 XML',
+  xlsm: 'Calc MS Excel 2007 VBA XML',
+  pptm: 'Impress MS PowerPoint 2007 XML VBA',
+  ppsx: 'Impress MS PowerPoint 2007 XML AutoPlay',
+  txt: 'Text (encoded):UTF8',
+  md: 'Text (encoded):UTF8',
+  // Comma-separated, double quotes, UTF-8 (tokens 1–3), from line 1, standard columns, system
+  // language, special numbers (dates) detected as before – and token 13 `false`: formulas stay
+  // text, so a cell like `=WEBSERVICE("http://…")` is never evaluated (LibreOffice's "Filter
+  // Options for the CSV Filter"; tokens 9–12 are for export only).
+  csv: 'Text - txt - csv (StarCalc):44,34,76,1,,0,false,true,false,false,false,,false',
+} as const;
+
+const isOoxml = (kind: OfficeDocumentKind) => !['txt', 'md', 'csv'].includes(kind);
+
+/**
+ * LibreOffice's font replacement table: Office's fonts always drawn in their free twins, the
+ * same the browser draws live elements in (`OFFICE_FONT_SUBSTITUTES`) – whatever is installed –
+ * and every other font a deck names in a free one of its kind (`officeFontFor`), not in
+ * whatever the computer falls back to (a serif for a sans on macOS).
+ */
+function fontReplacements(fonts: readonly string[] = [], own: readonly string[] = []): string {
+  const escape = (text: string) =>
+    text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  // The workspace's own fonts are drawn as themselves – even one named like an Office font.
+  const kept = new Set(own.map((family) => family.toLowerCase()));
+  const pairs = new Map(
+    Object.entries(OFFICE_FONT_SUBSTITUTES).filter(([font]) => !kept.has(font.toLowerCase())),
+  );
+  for (const font of fonts) {
+    if (kept.has(font.toLowerCase())) continue;
+    const substitute = officeFontFor(font);
+    if (substitute && substitute !== font && !pairs.has(font)) pairs.set(font, substitute);
+  }
+  return [...pairs]
+    .map(
+      ([font, substitute], i) =>
+        `<item oor:path="/org.openoffice.Office.Common/Font/Substitution/FontPairs"><node oor:name="_${i}" oor:op="replace">` +
+        `<prop oor:name="Always" oor:op="fuse"><value>true</value></prop>` +
+        `<prop oor:name="OnScreenOnly" oor:op="fuse"><value>false</value></prop>` +
+        `<prop oor:name="ReplaceFont" oor:op="fuse"><value>${escape(font)}</value></prop>` +
+        `<prop oor:name="SubstituteFont" oor:op="fuse"><value>${escape(substitute)}</value></prop>` +
+        `</node></item>`,
+    )
+    .join('\n');
+}
+
+/** Entries a deck's zip may list before it is opened to look for fonts (the import refuses more). */
+const MAX_DECK_ZIP_ENTRIES = 20_000;
+
+/**
+ * Families an ODP brings along (embedded fonts: a `style:font-face` with a source in the file,
+ * as `OdpDocument.embedFonts` adds them) – drawn as themselves, never replaced.
+ */
+export async function embeddedFonts(bytes: Uint8Array): Promise<string[]> {
+  if (!isOdpBytes(bytes)) return [];
+  let styles: string;
+  try {
+    if (!zipEntriesAtMost(bytes, MAX_DECK_ZIP_ENTRIES)) return [];
+    const entry = (await JSZip.loadAsync(bytes)).file('styles.xml');
+    styles = entry ? await xmlText('styles.xml', entry, { left: MAX_FONT_XML_PART }) : '';
+  } catch {
+    return [];
+  }
+  // Tag by tag (each read once): a pattern over the whole file with two open ends would take
+  // minutes on a font face with thousands of attributes.
+  const families: string[] = [];
+  for (const face of styles.matchAll(/<style:font-face\s[^>]*>/g)) {
+    const tag = face[0];
+    if (tag.length > 4000 || tag.endsWith('/>')) continue;
+    const after = styles.slice(face.index + tag.length, face.index + tag.length + 200);
+    if (!/^\s*<svg:font-face-src>/.test(after)) continue;
+    const family = /\ssvg:font-family="([^"]{1,100})"/.exec(tag)?.[1];
+    if (family) families.push(family.replace(/&apos;|&quot;|['"]/g, '').trim());
+  }
+  return families;
+}
+
+/** One XML part may unpack to this much, and all of a file's together (`deckFonts`). */
+const MAX_FONT_XML_PART = 64 * 1024 * 1024;
+const MAX_FONT_XML_TOTAL = 256 * 1024 * 1024;
+
+/**
+ * An XML part's text within a budget (`inflateEntry`: never more than the part declares): a
+ * small upload must not unpack to gigabytes here.
+ */
+async function xmlText(name: string, entry: object, budget: { left: number }): Promise<string> {
+  const bytes = await inflateEntry(
+    name,
+    entry,
+    Math.min(MAX_FONT_XML_PART, budget.left),
+    (message) => new Error(message),
+  );
+  budget.left -= bytes.length;
+  return new TextDecoder().decode(bytes);
+}
+
+/** Font names a deck (ODP or PowerPoint) uses – at most a few hundred, from its XML parts. */
+export async function deckFonts(bytes: Uint8Array): Promise<string[]> {
+  let zip: JSZip;
+  try {
+    if (!zipEntriesAtMost(bytes, MAX_DECK_ZIP_ENTRIES)) return [];
+    zip = await JSZip.loadAsync(bytes);
+  } catch {
+    return [];
+  }
+  const fonts = new Set<string>();
+  const pattern = /(?:fo:font-family|svg:font-family|style:font-name|typeface)="([^"]{1,100})"/g;
+  const budget = { left: MAX_FONT_XML_TOTAL };
+  for (const file of Object.values(zip.files)) {
+    if (file.dir || !file.name.endsWith('.xml')) continue;
+    let xml: string;
+    try {
+      xml = await xmlText(file.name, file, budget);
+    } catch {
+      // Too large to be read for its fonts: what was found so far stands.
+      return [...fonts];
+    }
+    for (const match of xml.matchAll(pattern)) {
+      const name = (match[1] as string).replace(/&apos;|&quot;|['"]/g, '').trim();
+      // `+mn-lt`: a theme font, named in the theme itself.
+      if (name && !name.startsWith('+')) fonts.add(name);
+      if (fonts.size >= 300) return [...fonts];
+    }
+  }
+  return [...fonts];
+}
+
+/**
+ * The profile every run starts with: no macros, no OLE or DDE, no links followed out of the
+ * document – a second line behind dropping the external links from the file itself. Links are
+ * never updated on load (officecfg `Content/Update/Link`: Writer `0` = never, Calc `1` = never –
+ * the enums differ), and Excel files are not recalculated on load (`OOXMLRecalcMode` `1` = never),
+ * so a formula that fetches does not run; the PDF shows the values the file was saved with.
+ *
+ * `poolScript`: the render pool's LibreOffice runs Slider's own script (`office-worker.py`, in the
+ * profile), which `DisableMacrosExecution` would block too. Documents still run none: the security
+ * level trusts no location or signature, and the script opens every file with
+ * `MacroExecutionMode` never.
+ *
+ * `replacements: false`: no font replacement table – for the render pool, which only draws files
+ * whose fonts are named already as they are to be drawn (`replaceFonts`); a table there would
+ * replace a workspace's own font named like an Office one (its own Calibri) by its twin.
+ */
+export const hardenedProfile = (
+  fonts: readonly string[] = [],
+  {
+    poolScript = false,
+    own = [],
+    replacements = true,
+  }: { poolScript?: boolean; own?: readonly string[]; replacements?: boolean } = {},
+) => `<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>${!poolScript}</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableActiveContent" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>0</value></prop></item>
+<item oor:path="/org.openoffice.Office.Calc/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>1</value></prop></item>
+<item oor:path="/org.openoffice.Office.Calc/Formula/Load"><prop oor:name="OOXMLRecalcMode" oor:op="fuse"><value>1</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Font/Substitution"><prop oor:name="Replacement" oor:op="fuse"><value>${replacements}</value></prop></item>
+${replacements ? fontReplacements(fonts, own) : ''}
+</oor:items>
+`;
+
+/** Where LibreOffice lives when it is not on the PATH (the macOS app bundle). */
+const WELL_KNOWN_SOFFICE = ['/Applications/LibreOffice.app/Contents/MacOS/soffice'];
+
+type Spawn = (
+  command: string,
+  args: string[],
+  options: { detached: boolean; env?: NodeJS.ProcessEnv },
+) => ChildProcess;
+
+/**
+ * Conversions still running, with their temp folder. They run in their own process group, so
+ * they would outlive the server: {@link stopRunningConversions} takes them down on shutdown.
+ */
+const running = new Map<ChildProcess, string>();
+/** Set by {@link stopRunningConversions}: the process is going down. */
+let stopping = false;
+
+/**
+ * A conversion cut off by shutdown – not a failure of the deck. Imports and re-renders let it
+ * through instead of falling back to the SVG preview, so the next start resumes them.
+ */
+export class ConversionAborted extends Error {
+  constructor() {
+    super('LibreOffice conversion stopped: the server is shutting down');
+    this.name = 'ConversionAborted';
+  }
+}
+
+/**
+ * LibreOffice ran, but made no PDF of the file: it exited with an error or wrote nothing usable –
+ * the file is broken, password protected or not what its name says.
+ */
+export class ConversionFailed extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConversionFailed';
+  }
+}
+
+/** A conversion killed after its timeout – a huge or pathological file, or a busy server. */
+export class ConversionTimedOut extends Error {
+  constructor(timeoutMs: number) {
+    super(`LibreOffice timed out after ${timeoutMs} ms`);
+    this.name = 'ConversionTimedOut';
+  }
+}
+
+/**
+ * Kills every running conversion (whole process group) and removes its temp folder right away –
+ * for shutdown and the restart after `/einrichtung`, where the process exits before the
+ * conversions' own clean-up would run. They and any conversion started afterwards end in
+ * {@link ConversionAborted}; their imports are picked up again on the next start.
+ */
+export function stopRunningConversions(): void {
+  stopping = true;
+  for (const [child, dir] of running) {
+    kill(child);
+    rmSync(dir, { recursive: true, force: true });
+  }
+  running.clear();
+}
+
+/**
+ * Conversions that run at once, across every converter: uploads, links, picks and syncs convert
+ * right in their request, besides the import queue – each run is a whole LibreOffice (hundreds
+ * of MB, a CPU core). The rest wait their turn: what someone waits for (`interactive`) first,
+ * else in order of arrival; the timeout starts with the run, not the wait.
+ */
+export const MAX_PARALLEL_CONVERSIONS = 2;
+let activeConversions = 0;
+const waitingConversions: Record<PoolPriority, (() => void)[]> = {
+  interactive: [],
+  background: [],
+};
+
+async function inConversionSlot<T>(
+  work: () => Promise<T>,
+  priority: PoolPriority = 'interactive',
+): Promise<T> {
+  if (activeConversions < MAX_PARALLEL_CONVERSIONS) activeConversions += 1;
+  else await new Promise<void>((resolve) => waitingConversions[priority].push(resolve));
+  try {
+    return await work();
+  } finally {
+    // The slot goes straight to the next one waiting, else it is free again.
+    const next = waitingConversions.interactive.shift() ?? waitingConversions.background.shift();
+    if (next) next();
+    else activeConversions -= 1;
+  }
+}
+
+export interface FindSofficeOptions {
+  /** `LIBREOFFICE_PATH`: used as is when set (and executable). */
+  configured?: string | null;
+  /** `PATH` to search for `soffice`. */
+  searchPath?: string;
+  /** Injected for tests. */
+  isExecutable?: (file: string) => Promise<boolean>;
+}
+
+const executable = async (file: string) => {
+  try {
+    await access(file, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The `soffice` binary: `LIBREOFFICE_PATH`, else `soffice` on the PATH, else the macOS app.
+ * `null` when LibreOffice is not installed.
+ */
+export async function findSoffice({
+  configured,
+  searchPath = process.env.PATH ?? '',
+  isExecutable = executable,
+}: FindSofficeOptions = {}): Promise<string | null> {
+  if (configured) return (await isExecutable(configured)) ? configured : null;
+  const candidates = [
+    ...searchPath
+      .split(path.delimiter)
+      .filter(Boolean)
+      .map((dir) => path.join(dir, 'soffice')),
+    ...WELL_KNOWN_SOFFICE,
+  ];
+  for (const candidate of candidates) {
+    if (await isExecutable(candidate)) return candidate;
+  }
+  return null;
+}
+
+export interface LibreOfficeOptions {
+  /** Path of `soffice`, see {@link findSoffice}. */
+  binary: string;
+  log: Logger;
+  timeoutMs?: number;
+  /** Injected for tests. */
+  spawn?: Spawn;
+  /** LibreOffices kept running: edited slides (`pages`) are drawn there instead. */
+  pool?: OfficePool | null;
+}
+
+/**
+ * Converts with `soffice --headless --convert-to pdf`. Every run gets its own temp folder and
+ * its own LibreOffice profile (`-env:UserInstallation`, hardened: {@link hardenedProfile}), so
+ * conversions can run side by side without fighting over the profile lock; the folder is removed
+ * afterwards. A run that takes longer than {@link LIBREOFFICE_TIMEOUT_MS} is killed (with its
+ * whole process group). Like PowerPoint's PDF, LibreOffice's leaves hidden slides out. The deck
+ * is handed over without its external links ({@link withoutExternalLinks}); a deck that is not a
+ * readable package is not converted at all.
+ */
+export function createLibreOfficePdf(options: LibreOfficeOptions): PptxToPdf {
+  const convert = converter(options);
+  const toPdf: PptxToPdf = async (pptx, { fonts = [], priority } = {}) =>
+    // LibreOffice loads linked pictures, media and OLE links while it draws the PDF: an
+    // uploaded deck must not make the server fetch internal URLs or read local files.
+    isOdpBytes(pptx)
+      ? convert(await withoutOdpLinks(pptx), 'odp', ODP_IMPORT_FILTER, 'pdf', fonts, priority)
+      : convert(
+          await withoutExternalLinks(pptx),
+          'pptx',
+          PPTX_IMPORT_FILTER,
+          'pdf',
+          fonts,
+          priority,
+        );
+  toPdf.pages = async (deck, pages, { priority, key, prepared = false, fonts = [] } = {}) => {
+    if (!isOdpBytes(deck)) throw new ConversionFailed('Only ODP decks are drawn page by page');
+    const odp = prepared ? deck : await odpForDrawing(deck, fonts);
+    if (options.pool && !stopping) {
+      try {
+        return await options.pool.convert(odp, {
+          extension: 'odp',
+          importFilter: ODP_IMPORT_FILTER,
+          exportFilter: 'impress_pdf_Export',
+          pageRange: pages.join(','),
+          priority,
+          key,
+        });
+      } catch (error) {
+        // No LibreOffice of the pool running: drawn the old way below.
+        if (!(error instanceof PoolUnavailable)) throw error;
+      }
+    }
+    return convert(odp, 'odp', ODP_IMPORT_FILTER, pdfOfPages(pages), [], priority);
+  };
+  toPdf.promote = (key) => options.pool?.promote(key);
+  return toPdf;
+}
+
+/**
+ * Word, Excel, PowerPoint variants and text as a PDF – like {@link createLibreOfficePdf}, Office
+ * files without their external links, each read with its own import filter only.
+ */
+export function createLibreOfficeDocumentPdf(options: LibreOfficeOptions): DocumentToPdf {
+  const convert = converter(options);
+  return async (bytes, kind, priority) => {
+    try {
+      return await convert(
+        isOoxml(kind) ? await withoutExternalLinks(bytes) : bytes,
+        kind,
+        DOCUMENT_IMPORT_FILTERS[kind],
+        'pdf',
+        [],
+        priority,
+      );
+    } catch (error) {
+      // The person only hears "broken or locked" or "try again": the cause is in the log.
+      if (!(error instanceof ConversionAborted)) {
+        options.log.warn(`LibreOffice could not convert a .${kind} file`, error);
+      }
+      throw error;
+    }
+  };
+}
+
+/**
+ * Files on a deck's material page LibreOffice reads, with the one import filter each is read
+ * with and the PDF export of its kind – their text is read from that PDF (`material-extract.ts`).
+ */
+export const MATERIAL_PDF_FILTERS = {
+  docx: ['MS Word 2007 XML', 'writer_pdf_Export'],
+  docm: ['MS Word 2007 XML VBA', 'writer_pdf_Export'],
+  doc: ['MS Word 97', 'writer_pdf_Export'],
+  odt: ['writer8', 'writer_pdf_Export'],
+  rtf: ['Rich Text Format', 'writer_pdf_Export'],
+  pptx: [PPTX_IMPORT_FILTER, 'impress_pdf_Export'],
+  pptm: ['Impress MS PowerPoint 2007 XML VBA', 'impress_pdf_Export'],
+  ppsx: ['Impress MS PowerPoint 2007 XML AutoPlay', 'impress_pdf_Export'],
+  ppt: ['MS PowerPoint 97', 'impress_pdf_Export'],
+  odp: [ODP_IMPORT_FILTER, 'impress_pdf_Export'],
+} as const;
+export type MaterialPdfKind = keyof typeof MATERIAL_PDF_FILTERS;
+
+/**
+ * A Word or PowerPoint file (or its OpenDocument twin) of a deck's board as a PDF. With `fonts`, a
+ * presentation is drawn as its deck is (`PptxToPdf`): by a LibreOffice of its own, with the
+ * replacement table and the workspace's fonts it names – the pool has neither.
+ */
+export type MaterialToPdf = (
+  bytes: Uint8Array,
+  kind: MaterialPdfKind,
+  options?: { fonts?: readonly EmbeddedFont[]; priority?: PoolPriority },
+) => Promise<Uint8Array>;
+
+/**
+ * {@link MaterialToPdf} with the pool of running LibreOffices – nobody waits for it on screen, so
+ * in the line after the editor's drawings (`background`) – else with a LibreOffice of its own.
+ * Office files go without their external links, an ODP without its links, as decks do; the
+ * pool reads every file with links never updated.
+ */
+export function createMaterialPdf(options: LibreOfficeOptions): MaterialToPdf {
+  const convert = converter(options);
+  return async (bytes, kind, { fonts, priority } = {}) => {
+    const [importFilter, exportFilter] = MATERIAL_PDF_FILTERS[kind];
+    const ooxml = kind.endsWith('x') || kind.endsWith('m');
+    const safe = ooxml
+      ? await withoutExternalLinks(bytes)
+      : kind === 'odp'
+        ? await withoutOdpLinks(bytes)
+        : bytes;
+    if (fonts) return convert(safe, kind, importFilter, 'pdf', fonts, priority ?? 'interactive');
+    if (options.pool && !stopping) {
+      try {
+        return await options.pool.convert(safe, {
+          extension: kind,
+          importFilter,
+          exportFilter,
+          priority: 'background',
+        });
+      } catch (error) {
+        if (!(error instanceof PoolUnavailable)) throw error;
+      }
+    }
+    return convert(safe, kind, importFilter, 'pdf', [], 'background');
+  };
+}
+
+/**
+ * What Writer takes in by making a text document (.odt) of it, with the one import filter each
+ * is read with.
+ */
+export const TEXT_DOCUMENT_FILTERS = {
+  docx: 'MS Word 2007 XML',
+  docm: 'MS Word 2007 XML VBA',
+  doc: 'MS Word 97',
+  rtf: 'Rich Text Format',
+  txt: 'Text (encoded):UTF8',
+  md: 'Text (encoded):UTF8',
+} as const;
+export type TextDocumentKind = keyof typeof TEXT_DOCUMENT_FILTERS;
+export type DocumentToOdt = (bytes: Uint8Array, kind: TextDocumentKind) => Promise<Uint8Array>;
+
+/** A Word or text file as a text document – Office files without their external links. */
+export function createTextDocumentOdt(options: LibreOfficeOptions): DocumentToOdt {
+  const convert = converter(options);
+  return async (bytes, kind) => {
+    const ooxml = kind === 'docx' || kind === 'docm';
+    try {
+      return await convert(
+        ooxml ? await withoutExternalLinks(bytes) : bytes,
+        kind,
+        TEXT_DOCUMENT_FILTERS[kind],
+        'odt:writer8',
+      );
+    } catch (error) {
+      if (!(error instanceof ConversionAborted)) {
+        options.log.warn(`LibreOffice could not make a text document of a .${kind} file`, error);
+      }
+      throw error;
+    }
+  };
+}
+
+const DECK_EXTENSIONS = new Set(['odp', 'pptx', 'pptm', 'ppsx']);
+
+function converter({
+  binary,
+  log,
+  timeoutMs = LIBREOFFICE_TIMEOUT_MS,
+  spawn = nodeSpawn,
+}: LibreOfficeOptions) {
+  return (
+    bytes: Uint8Array,
+    extension: string,
+    filter: string,
+    target = 'pdf',
+    own: readonly EmbeddedFont[] = [],
+    priority?: PoolPriority,
+  ): Promise<Uint8Array> =>
+    inConversionSlot(() => convertOnce(bytes, extension, filter, target, own), priority);
+
+  async function convertOnce(
+    bytes: Uint8Array,
+    extension: string,
+    filter: string,
+    target: string,
+    own: readonly EmbeddedFont[],
+  ) {
+    const dir = await mkdtemp(path.join(tmpdir(), 'slider-soffice-'));
+    try {
+      const input = path.join(dir, `deck.${extension}`);
+      const outDir = path.join(dir, 'out');
+      const profile = path.join(dir, 'profile');
+      await mkdir(path.join(profile, 'user'), { recursive: true });
+      // A deck's own fonts join the replacement table (`fontReplacements`).
+      const fonts = DECK_EXTENSIONS.has(extension) ? await deckFonts(bytes) : [];
+      // The workspace's fonts the deck names: in a font folder of this run (fontconfig).
+      const named = new Set(fonts.map((font) => font.toLowerCase()));
+      const used = own.filter((font) => named.has(font.family.toLowerCase()));
+      const env = await fontFolder(dir, used);
+      // … and those the file brings along: neither is replaced.
+      const embedded = extension === 'odp' ? await embeddedFonts(bytes) : [];
+      await writeFile(
+        path.join(profile, 'user', 'registrymodifications.xcu'),
+        hardenedProfile(fonts, { own: [...used.map((font) => font.family), ...embedded] }),
+      );
+      await writeFile(input, bytes);
+      await run(
+        spawn,
+        binary,
+        [
+          `-env:UserInstallation=${pathToFileURL(profile).href}`,
+          '--headless',
+          '--norestore',
+          '--nolockcheck',
+          '--nologo',
+          '--nodefault',
+          // The one import filter – no content sniffing into other formats.
+          `--infilter=${filter}`,
+          '--convert-to',
+          target,
+          '--outdir',
+          outDir,
+          input,
+        ],
+        timeoutMs,
+        dir,
+        env,
+      );
+      // `odt:writer8` → `deck.odt`.
+      const made = target.split(':')[0] ?? 'pdf';
+      let pdf: Uint8Array;
+      try {
+        pdf = new Uint8Array(await readFile(path.join(outDir, `deck.${made}`)));
+      } catch {
+        throw new ConversionFailed(`LibreOffice wrote no ${made.toUpperCase()}`);
+      }
+      if (made === 'pdf' && !isPdfBytes(pdf)) {
+        throw new ConversionFailed('LibreOffice wrote no valid PDF');
+      }
+      return pdf;
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch((error: unknown) =>
+        log.warn(`Could not remove LibreOffice temp folder ${dir}`, error),
+      );
+    }
+  }
+}
+
+/**
+ * The Google Fonts of the checkout (`fonts/google`, scripts/google-fonts.py) when LibreOffice is
+ * not run from the Docker image, which installs them for the system: without them a local
+ * LibreOffice draws Inter – a new deck's font – in Liberation Sans while the browser draws it in
+ * Inter, and the text jumps when it is clicked into. Missing in the image (not copied to /app).
+ */
+const BUNDLED_FONTS = fileURLToPath(new URL('../../../../fonts/google', import.meta.url));
+const bundledFontFolders: readonly string[] = existsSync(BUNDLED_FONTS) ? [BUNDLED_FONTS] : [];
+/**
+ * Where fontconfig keeps what it read of the checkout's fonts from run to run: a few hundred
+ * files, read afresh by every run, cost a fresh LibreOffice most of a second. The image's
+ * fonts are cached when it is built (`fc-cache`), so only a local LibreOffice needs it.
+ */
+const SHARED_FONT_CACHE = path.join(tmpdir(), 'slider-fontconfig');
+
+/**
+ * The environment that has LibreOffice's fontconfig find `folders` and the checkout's Google
+ * Fonts beside the system's fonts (`dir/fonts.conf`); `undefined` when there are none.
+ */
+export async function fontconfigEnv(
+  dir: string,
+  folders: readonly string[] = [],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<NodeJS.ProcessEnv | undefined> {
+  const all = [...bundledFontFolders, ...folders];
+  if (all.length === 0) return undefined;
+  const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const config = path.join(dir, 'fonts.conf');
+  await writeFile(
+    config,
+    `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+${all.map((folder) => `  <dir>${escape(folder)}</dir>`).join('\n')}
+${bundledFontFolders.length > 0 ? `  <cachedir>${escape(SHARED_FONT_CACHE)}</cachedir>\n` : ''}  <cachedir>${escape(path.join(dir, 'fontcache'))}</cachedir>
+</fontconfig>
+`,
+  );
+  return { ...env, FONTCONFIG_FILE: config };
+}
+
+/**
+ * Puts the workspace's fonts into `dir/fonts` and returns the environment that has
+ * LibreOffice's fontconfig find them – for this run only ({@link fontconfigEnv}).
+ */
+async function fontFolder(
+  dir: string,
+  fonts: readonly EmbeddedFont[],
+): Promise<NodeJS.ProcessEnv | undefined> {
+  if (fonts.length === 0) return fontconfigEnv(dir);
+  const folder = path.join(dir, 'fonts');
+  await mkdir(folder);
+  await Promise.all(
+    fonts.map((font, i) => writeFile(path.join(folder, `font-${i}.${font.format}`), font.bytes)),
+  );
+  return fontconfigEnv(dir, [folder]);
+}
+
+function run(
+  spawn: Spawn,
+  binary: string,
+  args: string[],
+  timeoutMs: number,
+  dir: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (stopping) {
+      reject(new ConversionAborted());
+      return;
+    }
+    // Own process group: on Linux `soffice` is a script that starts `soffice.bin`; a timeout
+    // must take both down.
+    const child = spawn(binary, args, env ? { detached: true, env } : { detached: true });
+    running.set(child, dir);
+    let stderr = '';
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderr.length < 4000) stderr += chunk.toString();
+    });
+    child.stdout?.resume();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      kill(child);
+    }, timeoutMs);
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      running.delete(child);
+      reject(stopping ? new ConversionAborted() : error);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      running.delete(child);
+      if (stopping) reject(new ConversionAborted());
+      else if (timedOut) reject(new ConversionTimedOut(timeoutMs));
+      else if (code === 0) resolve();
+      else {
+        reject(
+          new ConversionFailed(
+            `LibreOffice exited with ${code ?? signal}${stderr ? `: ${stderr.trim()}` : ''}`,
+          ),
+        );
+      }
+    });
+  });
+}
+
+function kill(child: ChildProcess): void {
+  try {
+    if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+    else child.kill('SIGKILL');
+  } catch {
+    child.kill('SIGKILL');
+  }
+}

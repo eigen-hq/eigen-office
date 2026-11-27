@@ -1,0 +1,51 @@
+import { useEffect } from 'react';
+import { Outlet, useParams } from 'react-router';
+import { useAccount } from '@/features/auth';
+import { AppHeader } from '@/shell/AppHeader';
+import { AudienceDialog } from './components/AudienceDialog';
+import { BlockedWorkspace } from './components/BlockedWorkspace';
+import { ForeignWorkspace } from './components/ForeignWorkspace';
+import { PlanBanner } from './components/PlanBanner';
+import { rememberWorkspace } from './lib/last-workspace';
+
+/**
+ * `/w/:workspaceId/*`: remembers the workspace for `/`. Workspaces the account doesn't (or no
+ * longer) belong to – just left, deleted, or a foreign link – go to `/`, which opens another one;
+ * one of another account signed in here offers the switch (`ForeignWorkspace`).
+ * A workspace founded at sign-up asks its admin once whether it is private or the company's.
+ * Over the plan's limits, about to fall back to free or asked to pay: a banner to "Nutzung".
+ * Blocked by the instance admin (BER-167): only that, and leaving.
+ */
+export function Component() {
+  const { workspaceId = '' } = useParams();
+  const { workspaces, user, domainJoin } = useAccount();
+  const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+
+  useEffect(() => {
+    if (workspace) rememberWorkspace(workspace.id);
+  }, [workspace]);
+
+  if (!workspace) return <ForeignWorkspace workspaceId={workspaceId} />;
+  if (workspace.blocked) return <BlockedWorkspace workspace={workspace} userId={user.id} />;
+  // A fresh page per workspace: /w/A → /w/B matches the same route, and without the key its
+  // pages keep A's state (running bulk re-render, search, tab) – see WorkspaceLayout.test.tsx.
+  // The header is the layout's, not each page's: switching views (Projekte ⇄ Bibliothek, a master)
+  // keeps it as it is – logo, switcher and avatar aren't built again, so they don't flash.
+  return (
+    <div className="flex min-h-full flex-col bg-canvas">
+      <PlanBanner workspace={workspace} userId={user.id} />
+      <AppHeader />
+      {/* The page fills what is left below the header (its drop zone, marquee). The dots lie
+          behind the content only, fading out towards the header and just before the screen's
+          right and bottom edge (a side bar's layout keeps them off its bar the same way:
+          `CloudLayout`, `SenderLayout`). */}
+      <div className="dot-grid flex flex-1 flex-col [--dot-fade-b:96px] [--dot-fade-r:96px] [--dot-fade-t:80px] [--dot-gap-t:16px] *:flex-1">
+        <Outlet key={workspace.id} />
+      </div>
+      {/* Founded at sign-up: private or the company's? (BER-148) */}
+      {domainJoin && workspace.audiencePending && workspace.role === 'admin' && (
+        <AudienceDialog key={workspace.id} workspace={workspace} email={user.email} />
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,84 @@
+import { useSearchParams } from 'react-router';
+import { useAuthProviders } from '@/lib/api';
+import { SettingsLayout } from '@/shell/layouts/SettingsLayout';
+import { isLoginError, LoginErrorBanner, useAccount } from '@/features/auth';
+import { Avatar, Section, TextField, useToast } from '@/ui';
+import {
+  CloudLoginSection,
+  LoginsSection,
+  NameField,
+  PasskeysSection,
+} from './components/AccountSections';
+import { DeleteAccountSection, ExportDataSection } from './components/DataSections';
+import { StorageSection } from './components/StorageSection';
+import { AppConnectionsSection } from './components/AppConnectionsSection';
+import { LinkedAccountsSection } from './components/LinkedAccountsSection';
+import { ProfilePicture } from './components/ProfilePicture';
+
+/** The groups inside a card, split by hairlines. */
+const GROUPS =
+  'flex flex-col divide-y divide-hairline [&>*]:py-5 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0';
+
+/**
+ * `/konto` – "Konto & Anmeldung": who you are, how you sign in ("Anmeldung": Microsoft, Google,
+ * SSO, passkeys), what each account at a mail provider is linked for („Verknüpfte Konten“),
+ * where Slider reads files from ("Speicherorte": Nextcloud), AI apps let in over
+ * MCP („KI-Apps“), and your data: download it, delete the account (BER-145). `?linkError=` after
+ * a failed "Verbinden";
+ * `?nextcloud=<server>&returnTo=` to connect that Nextcloud again (a review's banner). Your
+ * colour, how decks open and the instance settings live on `/einstellungen`.
+ */
+export function Component() {
+  const { user, viewer } = useAccount();
+  const [toast, showToast] = useToast();
+  const [searchParams] = useSearchParams();
+  const linkError = searchParams.get('linkError');
+  // The desktop app signs in to its Slider server, not to this local one (BER-201).
+  const desktop = useAuthProviders().data?.desktop ?? false;
+
+  return (
+    <SettingsLayout
+      docTitle="Konto & Anmeldung | Slider"
+      title="Konto & Anmeldung"
+      leading={<Avatar author={viewer.author} size={32} />}
+      back="app"
+      toast={toast}
+    >
+      {isLoginError(linkError) && <LoginErrorBanner code={linkError} />}
+
+      <Section
+        title="Profil"
+        description="Bild und Namen sehen die anderen an deinen Kommentaren und Nachrichten. Die Adresse kommt von deiner Anmeldung."
+      >
+        <ProfilePicture author={viewer.author} onNotify={showToast} />
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <NameField name={user.name} />
+          <TextField label="E-Mail" value={user.email} readOnly />
+        </div>
+      </Section>
+
+      <Section title="Anmeldung" description="Mit jedem dieser Wege kommst du in dieses Konto.">
+        {desktop ? (
+          // A passkey here would guard nothing: this local server has no login.
+          <CloudLoginSection />
+        ) : (
+          <div className={GROUPS}>
+            <LoginsSection />
+            <PasskeysSection onNotify={showToast} />
+          </div>
+        )}
+      </Section>
+
+      <LinkedAccountsSection />
+
+      <StorageSection
+        onNotify={showToast}
+        reconnect={searchParams.get('nextcloud')}
+        returnTo={searchParams.get('returnTo')}
+      />
+      <AppConnectionsSection onNotify={showToast} />
+      <ExportDataSection />
+      <DeleteAccountSection email={user.email} />
+    </SettingsLayout>
+  );
+}

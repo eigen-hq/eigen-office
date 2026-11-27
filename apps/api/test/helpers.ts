@@ -1,0 +1,548 @@
+import type Anthropic from '@anthropic-ai/sdk';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { eq } from 'drizzle-orm';
+import postgres from 'postgres';
+import { inject } from 'vitest';
+import { DESKTOP_PAGE_COOKIE, type CreateCommentInput, type Shape } from '@slider/shared';
+import type { ParsedPresentation, ParsedSlide } from '@slider/pptx';
+import { createApp } from '../src/app';
+import { desktopPageToken } from '../src/http/desktop-guard';
+import { BackgroundWork } from '../src/background-work';
+import { MicrosoftLogin } from '../src/auth/microsoft';
+import { NextcloudAccounts } from '../src/auth/nextcloud';
+import { OidcClient } from '../src/auth/oidc';
+import type { WebAuthn } from '../src/auth/passkeys';
+import type { ResolveTxt } from '../src/auth/workspace-sso';
+import { hashToken, newSecretToken, SESSION_COOKIE } from '../src/auth/session';
+import type { Clock } from '../src/clock';
+import type { Config } from '../src/config';
+import {
+  migratedSnapshot,
+  migratePostgresAt,
+  openDatabase,
+  openSnapshot,
+  type DatabaseHandle,
+} from '../src/db/client';
+import {
+  decks,
+  revisions,
+  sessions,
+  slides,
+  slideVersions,
+  users,
+  type UserRow,
+} from '../src/db/schema';
+import type { BillingProvider } from '../src/billing/stripe-billing';
+import type { AppDeps, InstanceControl } from '../src/deps';
+import { importDeck } from '../src/import/import-deck';
+import type { DocumentToPdf, MaterialToPdf, PptxToPdf } from '../src/import/libreoffice';
+import type { OpenPptx } from '../src/import/pptx';
+import { BlankDecks } from '../src/import/ready-blank';
+import {
+  importJobKey,
+  importJobPriority,
+  InProcessQueue,
+  type ImportJob,
+} from '../src/import/queue';
+import { RenderProgress } from '../src/import/render-progress';
+import { silentLogger } from '../src/logger';
+import { NullMailer, type Mailer } from '../src/mail/mailer';
+import type { MailServers } from '../src/mail/servers';
+import type { LiveHub } from '../src/realtime/live-hub';
+import { DEFAULT_PLAN_LIMITS } from '../src/services/plans';
+import { upsertUser } from '../src/services/users';
+import { ensurePersonalWorkspace } from '../src/services/workspaces';
+import type { FetchLike, LookupAll } from '../src/sources/safe-fetch';
+import { createSourceAdapters, type SourceAdapters } from '../src/sources/source-adapter';
+import { blobKeys } from '../src/storage/blob-storage';
+import { EncryptedBlobStorage } from '../src/storage/encrypted-blob-storage';
+import { TEST_DATA_KEY } from './setup-data-key';
+import { FsBlobStorage } from '../src/storage/fs-blob-storage';
+import { SyncService } from '../src/sync/sync-service';
+import type { CutOutSource } from '../src/services/cut-outs';
+import type { StockPhotoSource } from '../src/services/stock-photos';
+
+export class TestClock implements Clock {
+  private offsetMs = 0;
+  now(): Date {
+    return new Date(Date.now() + this.offsetMs);
+  }
+  advance(ms: number): void {
+    this.offsetMs += ms;
+  }
+}
+
+export const testConfig = (overrides: Partial<Config> = {}): Config => ({
+  env: 'test',
+  port: 0,
+  dataDir: '/unused',
+  secret: 'test-secret-test-secret-test-secret!',
+  webOrigin: 'http://localhost:5173',
+  maxUploadBytes: 1024 * 1024,
+  devOwner: { name: 'Robert Hofmann', email: 'robert@example.org' },
+  // Requests without a session act as the dev owner, like `bun run dev` without a login.
+  auth: {
+    devLogin: true,
+    signup: 'invite',
+    signupDomains: [],
+    oidc: null,
+    google: null,
+    googleMailboxes: false,
+    sessionTtlDays: 30,
+  },
+  smtp: null,
+  contactEmail: null,
+  retention: { deleteUnused: false },
+  inviteRateLimit: 1000,
+  microsoft: null,
+  nextcloud: { server: null, login: null, loginAnyServer: false },
+  media: { dir: '/unused', maxBytes: 1024 * 1024 },
+  // The real plans (free: 5 people, 20 GB, decks unlimited); tests that need more pass `plans`.
+  limited: true,
+  plans: DEFAULT_PLAN_LIMITS,
+  // Without Stripe; billing tests pass `billing` and a fake provider (`test/fakes/billing`).
+  billing: null,
+  ...overrides,
+});
+
+/** A parser stub: `slideCount` slides with one title shape each, no comments. */
+export function stubPptx(presentation: Partial<ParsedPresentation> = {}, slideCount = 2): OpenPptx {
+  const parsed: ParsedPresentation = {
+    size: { cx: 12_192_000, cy: 6_858_000 },
+    slides: Array.from({ length: slideCount }, (_, i) => parsedSlide(256 + i, i)),
+    sections: [],
+    comments: [],
+    author: null,
+    ...presentation,
+  };
+  return async () => ({
+    presentation: parsed,
+    renderSlideSvg: async (slide: ParsedSlide) =>
+      `<svg xmlns="http://www.w3.org/2000/svg"><text>${slide.sldId}</text></svg>`,
+  });
+}
+
+export function parsedSlide(sldId: number, index: number): ParsedSlide {
+  return {
+    sldId,
+    index,
+    path: `ppt/slides/slide${index + 1}.xml`,
+    hidden: false,
+    guides: [],
+    contentHash: '',
+    creationId: null,
+    groups: [],
+    title: `Folie ${index + 1}`,
+    layoutName: 'Titel und Inhalt',
+    textHash: `hash${index}`,
+    background: null,
+    shapes: [
+      {
+        id: '2',
+        name: 'Titel 1',
+        kind: 'text',
+        bbox: { x: 0.1, y: 0.1, w: 0.8, h: 0.2 },
+        text: `Folie ${index + 1}`,
+        paragraphs: [],
+        imagePath: null,
+        fill: null,
+        placeholder: 'title',
+      },
+    ],
+  };
+}
+
+export interface TestContext {
+  app: ReturnType<typeof createApp>;
+  deps: AppDeps;
+  clock: TestClock;
+  ownerId: string;
+  /** The dev owner's workspace ("Mein Workspace"); `createReadyDeck` puts decks here. */
+  workspaceId: string;
+  blobsDir: string;
+  request(
+    path: string,
+    init?: RequestInit & { json?: unknown; cookie?: string },
+  ): Promise<Response>;
+  cleanup(): Promise<void>;
+}
+
+export const MICROSOFT_TEST_CONFIG = {
+  clientId: 'client-id',
+  clientSecret: 'client-secret',
+  tenant: 'common',
+  redirectUri: 'http://localhost:5173/api/auth/microsoft/callback',
+};
+
+/** Outgoing requests in tests must be mocked: this one fails loudly instead of hitting the network. */
+export const offlineFetch: FetchLike = async (input) => {
+  throw new Error(`Unexpected network request in test: ${String(input)}`);
+};
+
+/** Every host resolves to a public documentation address (TEST-NET-3 is not private). */
+export const publicLookup: LookupAll = async () => [{ address: '203.0.113.10' }];
+
+/** Migrated once per run (`global-database.ts`), else once per test file; then copied per test. */
+let snapshot: Promise<Blob> | undefined;
+let template: Promise<string> | undefined;
+
+const loadSnapshot = async () => {
+  const file = inject('databaseSnapshot');
+  return file ? new Blob([await readFile(file)]) : migratedSnapshot();
+};
+
+const databaseUrl = (serverUrl: string, name: string) => {
+  const url = new URL(serverUrl);
+  url.pathname = `/${name}`;
+  return url.toString();
+};
+
+/**
+ * An in-memory PGlite – or, with `TEST_DATABASE_URL` (CI's Postgres job), a fresh database on
+ * that Postgres server, dropped again on close. That way the whole suite also runs on the
+ * production driver (postgres-js) and its migrator, e.g.
+ * `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres bun run test`.
+ * Either way the migrations run once per test run (`global-database.ts`): PGlite starts from a
+ * migrated snapshot, Postgres copies a migrated template database.
+ */
+export async function openTestDatabase(
+  serverUrl = process.env.TEST_DATABASE_URL,
+): Promise<DatabaseHandle> {
+  if (!serverUrl) return openSnapshot(await (snapshot ??= loadSnapshot()));
+  const admin = async (statement: string) => {
+    const client = postgres(serverUrl, { max: 1, onnotice: () => {} });
+    try {
+      await client.unsafe(statement);
+    } finally {
+      await client.end();
+    }
+  };
+  template ??= (async () => {
+    const provided = inject('databaseTemplate');
+    if (provided) return provided;
+    const name = `slider_template_${crypto.randomUUID().replaceAll('-', '')}`;
+    await admin(`create database ${name}`);
+    await migratePostgresAt(databaseUrl(serverUrl, name));
+    return name;
+  })();
+  const name = `slider_test_${crypto.randomUUID().replaceAll('-', '')}`;
+  await admin(`create database ${name} template ${await template}`);
+  const handle = await openDatabase(databaseUrl(serverUrl, name));
+  return {
+    db: handle.db,
+    close: async () => {
+      await handle.close();
+      await admin(`drop database if exists ${name} with (force)`);
+    },
+  };
+}
+
+export async function createTestContext(
+  options: {
+    openPptx?: OpenPptx;
+    /** LibreOffice's PDF of a PPTX (BER-94); a fake – LibreOffice is not needed for tests. */
+    libreOfficePdf?: PptxToPdf;
+    /** LibreOffice's PDF of a Word, Excel or text file; a fake too. Without it those are refused. */
+    documentPdf?: DocumentToPdf;
+    /** LibreOffice's PDF of a Word or PowerPoint file in Cloud; a fake too. Without it none. */
+    materialPdf?: MaterialToPdf;
+    config?: Partial<Config>;
+    fetch?: FetchLike;
+    lookup?: LookupAll;
+    /** DNS TXT records for workspaces' company logins (BER-162); none without it. */
+    resolveTxt?: ResolveTxt;
+    /** Replaces individual source adapters, e.g. with a fake link source (no network). */
+    sources?: Partial<SourceAdapters>;
+    /** e.g. a `RecordingMailer` – invitations are only mailed with a configured mailer. */
+    mailer?: Mailer;
+    /** A fake Stripe (`test/fakes/billing`); needs `config.billing` too. */
+    billing?: BillingProvider;
+    /** A fake Anthropic client for the workspace AI (BER-183): no network. */
+    anthropic?: (apiKey: string) => Anthropic;
+    /** A fake OpenAI-compatible AI service: answers instead of the network. */
+    aiFetch?: (input: string, init?: RequestInit) => Promise<Response>;
+    /** The desktop app's Slider server (BER-201): answers instead of the network. */
+    cloudFetch?: (input: string, init?: RequestInit) => Promise<Response>;
+    /** A fake Unsplash: stock photos without network. */
+    stockPhotos?: StockPhotoSource;
+    /** A fake rembg: pictures cut out without network. */
+    cutOuts?: CutOutSource;
+    /** Fake IMAP/SMTP: mailboxes without servers. */
+    mailServers?: MailServers;
+    /** Fake token endpoints of Microsoft and Google for mailboxes' sign-ins. */
+    mailOAuthFetch?: (input: string, init?: RequestInit) => Promise<Response>;
+    /** Fake calendars of mail accounts (CalDAV, Google, Graph). */
+    mailCalendars?: AppDeps['mailCalendars'];
+    /** Fake passkey verification (no real authenticator in tests). */
+    webauthn?: WebAuthn;
+    /** Environment and restart hook for the setup page; without it `/api/setup` is a 404. */
+    instance?: InstanceControl;
+    /** e.g. a hub with short stream timings; `createApp` makes a default one otherwise. */
+    live?: LiveHub;
+    /**
+     * The dev owner is instance admin: the instance is claimed. Without the dev login, an
+     * unclaimed instance lets signed-in accounts do nothing before the setup token
+     * (`auth/instance-gate`) – tests of everything else start claimed.
+     */
+    instanceAdmin?: boolean;
+    /** How long a pull waits for its import; 0 answers `queued` right away (gated imports). */
+    syncWaitMs?: number;
+  } = {},
+): Promise<TestContext> {
+  const { db, close } = await openTestDatabase();
+  const blobsDir = await mkdtemp(path.join(tmpdir(), 'slider-api-test-'));
+  // Encrypted at rest like in production (BER-149).
+  const storage = new EncryptedBlobStorage(new FsBlobStorage(blobsDir), TEST_DATA_KEY);
+  const media = new EncryptedBlobStorage(
+    new FsBlobStorage(path.join(blobsDir, 'media-store')),
+    TEST_DATA_KEY,
+  );
+  const clock = new TestClock();
+  const owner = await upsertUser(db, {
+    name: 'Robert Hofmann',
+    email: 'robert@example.org',
+    color: 'red',
+  });
+  if (options.instanceAdmin) {
+    await db.update(users).set({ isInstanceAdmin: true }).where(eq(users.id, owner.id));
+  }
+  const workspaceId = await ensurePersonalWorkspace(db, owner.id);
+  const openPptx = options.openPptx ?? stubPptx();
+  const renderers = { libreOfficePdf: options.libreOfficePdf };
+  const renderProgress = new RenderProgress();
+  const config = testConfig(options.config);
+  const queue: InProcessQueue<ImportJob> = new InProcessQueue<ImportJob>(
+    (job) =>
+      importDeck(
+        {
+          db,
+          storage,
+          openPptx,
+          clock,
+          log: silentLogger,
+          ...renderers,
+          renderProgress,
+          queue,
+        },
+        job,
+      ),
+    silentLogger,
+    { priority: importJobPriority, key: importJobKey },
+  );
+  const fetch = options.fetch ?? offlineFetch;
+  const microsoft = new MicrosoftLogin({
+    config: config.microsoft,
+    clock,
+    log: silentLogger,
+    fetch,
+  });
+  const nextcloud = new NextcloudAccounts({
+    db,
+    secret: config.secret,
+    clock,
+    config: config.nextcloud,
+    log: silentLogger,
+    maxBytes: config.maxUploadBytes,
+    webOrigin: config.webOrigin,
+    fetch,
+    lookup: options.lookup ?? publicLookup,
+  });
+  const sources: SourceAdapters = {
+    ...createSourceAdapters({
+      config,
+      fetch,
+      lookup: options.lookup ?? publicLookup,
+      nextcloud,
+    }),
+    ...options.sources,
+  };
+  const sync = new SyncService({
+    db,
+    storage,
+    sources,
+    queue,
+    clock,
+    log: silentLogger,
+    config,
+    documentPdf: options.documentPdf,
+    waitMs: options.syncWaitMs,
+  });
+  const deps: AppDeps = {
+    config,
+    db,
+    storage,
+    media,
+    queue,
+    sources,
+    microsoft,
+    nextcloud,
+    clock,
+    log: silentLogger,
+    sync,
+    rendering: { renderers, progress: renderProgress },
+    blankDecks: new BlankDecks({ openPptx, clock, log: silentLogger, ...renderers }),
+    documentPdf: options.documentPdf,
+    materialPdf: options.materialPdf,
+    oidc: config.auth.oidc ? new OidcClient(config.auth.oidc, clock, fetch) : null,
+    google: config.auth.google ? new OidcClient(config.auth.google, clock, fetch) : null,
+    webauthn: options.webauthn,
+    anthropic: options.anthropic,
+    aiFetch: options.aiFetch,
+    cloudFetch: options.cloudFetch,
+    stockPhotos: options.stockPhotos,
+    cutOuts: options.cutOuts,
+    mailServers: options.mailServers,
+    mailOAuthFetch: options.mailOAuthFetch ?? offlineFetch,
+    mailCalendars: options.mailCalendars,
+    // Firms' logos beside mails: never the real DNS or web (a test swaps the fakes in place).
+    senderLogos: { fetch, lookup: options.lookup ?? publicLookup, resolveTxt: async () => [] },
+    // Links' cards in messages: never the real web either.
+    linkPreviews: { fetch, lookup: options.lookup ?? publicLookup },
+    ssoNetwork: {
+      fetch,
+      lookup: options.lookup ?? publicLookup,
+      resolveTxt: options.resolveTxt ?? (async () => []),
+    },
+    billing: options.billing ?? null,
+    mailer: options.mailer ?? new NullMailer(),
+    instance: options.instance,
+    ownerId: owner.id,
+    live: options.live,
+    background: new BackgroundWork(),
+  };
+  const app = createApp(deps);
+
+  return {
+    app,
+    deps,
+    clock,
+    ownerId: owner.id,
+    workspaceId,
+    blobsDir,
+    request: async (url, init = {}) => {
+      const { json, cookie, ...rest } = init;
+      const headers = new Headers(rest.headers);
+      if (json !== undefined) headers.set('Content-Type', 'application/json');
+      if (cookie) headers.set('Cookie', cookie);
+      // The desktop's local server answers its pages only: Electron gives them this cookie.
+      else if (deps.config.desktop && !headers.has('Cookie')) {
+        headers.set('Cookie', `${DESKTOP_PAGE_COOKIE}=${desktopPageToken(deps.config.secret)}`);
+      }
+      return app.request(url, {
+        ...rest,
+        headers,
+        body: json !== undefined ? JSON.stringify(json) : rest.body,
+      });
+    },
+    cleanup: async () => {
+      await queue.idle();
+      // Work after an answer (an edit's slides drawn sharper) writes files and rows until done.
+      await deps.background?.idle();
+      await close();
+      await rm(blobsDir, { recursive: true, force: true });
+    },
+  };
+}
+
+export interface DeckFixture {
+  deckId: string;
+  revisionId: string;
+  slideIds: string[];
+  imageKeys: string[];
+}
+
+/** Inserts a ready deck with `slideCount` slides (and stored renders) straight into the database. */
+export async function createReadyDeck(
+  ctx: TestContext,
+  { title = 'Testdeck', slideCount = 3, shapes = [] as Shape[] } = {},
+): Promise<DeckFixture> {
+  const { db, storage } = ctx.deps;
+  const deckId = crypto.randomUUID();
+  const revisionId = crypto.randomUUID();
+  const slideIds = Array.from({ length: slideCount }, () => crypto.randomUUID());
+  const imageKeys = slideIds.map(() => blobKeys.slideRender(deckId, revisionId, 'svg'));
+
+  await db.insert(decks).values({
+    id: deckId,
+    ownerId: ctx.ownerId,
+    linkedById: ctx.ownerId,
+    workspaceId: ctx.workspaceId,
+    title,
+    fileName: `${title}.pptx`,
+    source: 'upload',
+    importState: { status: 'ready' },
+  });
+  await db.insert(revisions).values({ id: revisionId, deckId, number: 1, pptxKey: null });
+  await db.update(decks).set({ currentRevisionId: revisionId }).where(eq(decks.id, deckId));
+  await db.insert(slides).values(slideIds.map((id) => ({ id, deckId })));
+  await db.insert(slideVersions).values(
+    slideIds.map((slideId, position) => ({
+      id: crypto.randomUUID(),
+      slideId,
+      revisionId,
+      position,
+      imageKey: imageKeys[position] ?? '',
+      thumbnailKey: imageKeys[position] ?? '',
+      aspectRatio: 16 / 9,
+      shapes,
+    })),
+  );
+  for (const key of imageKeys) await storage.put(key, new TextEncoder().encode('<svg/>'));
+  return { deckId, revisionId, slideIds, imageKeys };
+}
+
+export const pinComment = (slideId: string, body = 'Bitte prüfen.'): CreateCommentInput => ({
+  slideId,
+  body,
+  anchor: { type: 'point', point: { x: 0.5, y: 0.5 }, shapeRef: null },
+});
+
+/** A user with a login session (BER-129); `cookie` signs requests in as them. */
+export async function signedInUser(
+  ctx: TestContext,
+  person: { name: string; email: string },
+): Promise<{ user: UserRow; cookie: string }> {
+  const user = await upsertUser(ctx.deps.db, { ...person, color: 'blue' });
+  const token = newSecretToken();
+  const now = ctx.clock.now();
+  await ctx.deps.db.insert(sessions).values({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    tokenHash: hashToken(token),
+    createdAt: now,
+    lastSeenAt: now,
+    expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+  });
+  return { user, cookie: `${SESSION_COOKIE}=${token}` };
+}
+
+/**
+ * The `slider_session=…` pair a response sets (`__Host-slider_session` on an https production
+ * instance), or `null` (deletions don't count).
+ */
+/** `name=value` of the cookie `name` a response sets (with or without `__Host-`), else `''`. */
+export const cookiePair = (res: Response, name: string) =>
+  res.headers
+    .getSetCookie()
+    .map((header) => header.split(';')[0] ?? '')
+    .find((pair) => pair.startsWith(`${name}=`) || pair.startsWith(`__Host-${name}=`)) ?? '';
+
+export function sessionCookieFrom(response: Response): string | null {
+  for (const header of response.headers.getSetCookie()) {
+    const pair = header.split(';')[0] ?? '';
+    const name = pair.slice(0, pair.indexOf('='));
+    const named = name === SESSION_COOKIE || name === `__Host-${SESSION_COOKIE}`;
+    if (named && pair !== `${name}=`) return pair;
+  }
+  return null;
+}
+
+/** An unsigned JWT – the code flow takes ID tokens from the token endpoint unverified. */
+export const fakeJwt = (claims: Record<string, unknown>) =>
+  [
+    Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url'),
+    Buffer.from(JSON.stringify(claims)).toString('base64url'),
+    'signature',
+  ].join('.');

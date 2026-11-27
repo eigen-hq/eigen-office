@@ -1,0 +1,116 @@
+# syntax=docker/dockerfile:1
+#
+# Slider as one container: the Bun API also serves the built web app (apps/web/dist).
+#   docker build -t slider:local .
+#   docker run -d -p 8787:8787 -v slider-data:/data -e SLIDER_URL=https://slider.firma.de slider:local
+# Nothing else is required: the secret is generated into /data, the database is PGlite in /data
+# (or DATABASE_URL), and the login is set up in the browser via the link in the log.
+# CI builds and smoke-tests it (scripts/smoke-image.sh) but publishes nothing: everyone builds
+# their own from the checkout; see docs/self-hosting.md.
+#
+# Debian slim, not Alpine: @napi-rs/canvas (PDF → slide images) ships glibc binaries.
+
+ARG BUN_VERSION=1.3.13
+ARG NODE_VERSION=22
+
+# Node and the web build run on the build machine's platform: their output is platform-neutral.
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-bookworm-slim AS node
+
+# ── Workspace manifests only, so the dependency layers stay cached between code changes ──────
+FROM oven/bun:${BUN_VERSION}-slim AS manifests
+WORKDIR /app
+COPY package.json bun.lock bunfig.toml ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+# The website (apps/site) is not part of the image, but bun.lock lists it as a workspace.
+COPY apps/site/package.json apps/site/
+COPY packages/shared/package.json packages/shared/
+COPY packages/pptx/package.json packages/pptx/
+COPY packages/odp/package.json packages/odp/
+COPY packages/odt/package.json packages/odt/
+# The template library is built ahead and copied below; bun.lock lists it as a workspace.
+COPY packages/templates/package.json packages/templates/
+
+# ── Build the web app (tsc + Vite run on Node, like in CI) ───────────────────────────────────
+FROM --platform=$BUILDPLATFORM oven/bun:${BUN_VERSION}-slim AS web
+WORKDIR /app
+COPY --from=manifests /app ./
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+RUN bun install --frozen-lockfile
+COPY tsconfig.base.json ./
+COPY packages/shared packages/shared
+COPY packages/pptx packages/pptx
+COPY packages/odp packages/odp
+COPY packages/odt packages/odt
+COPY apps/web apps/web
+RUN cd apps/web && bun run build
+
+# ── Production dependencies of the API (target platform: @napi-rs/canvas is native) ──────────
+FROM manifests AS api-deps
+RUN bun install --frozen-lockfile --production --filter @slider/api
+
+# ── Runtime ──────────────────────────────────────────────────────────────────────────────────
+FROM oven/bun:${BUN_VERSION}-slim AS runtime
+LABEL org.opencontainers.image.title="Slider" \
+      org.opencontainers.image.description="Review PowerPoint decks precisely: mark, comment, version."
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=8787 \
+    DATA_DIR=/data
+
+# LibreOffice draws the slide images of uploaded decks like PowerPoint (BER-94; linked decks use
+# Office via Microsoft Graph), and turns Word, Excel and text files picked in a cloud into PDF decks.
+# Impress, Writer and Calc only (no Java, no recommends), plus fonts metric-compatible with the
+# Office ones (Carlito ≙ Calibri, Caladea ≙ Cambria, Liberation ≙ Arial/Times/Courier) so text
+# wraps where PowerPoint wraps it. Costs roughly 450–550 MB of image size (Impress; Writer and
+# Calc add some more); without it uploads fall back to the built-in SVG preview and Word, Excel
+# and text files are refused. The `soffice` binary is found on the PATH. Its Python script
+# provider runs the render pool's script inside the LibreOffices kept running for the editor
+# (`office-worker.py`, LIBREOFFICE_WORKERS).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libreoffice-impress libreoffice-writer libreoffice-calc libreoffice-script-provider-python \
+      fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea fonts-dejavu \
+      fontconfig tini \
+ && rm -rf /var/lib/apt/lists/*
+
+# The most used Google Fonts, drawn as themselves (scripts/google-fonts.py; the browser has the
+# same faces in apps/web/public/fonts/office). 100 families, about 44 MB.
+COPY fonts/google /usr/share/fonts/truetype/google
+RUN fc-cache -f
+
+# package.json files and node_modules (workspace symlinks included).
+COPY --from=api-deps /app ./
+COPY tsconfig.base.json ./
+COPY packages/shared/src packages/shared/src
+COPY packages/shared/tsconfig.json packages/shared/
+COPY packages/pptx/src packages/pptx/src
+COPY packages/pptx/tsconfig.json packages/pptx/
+COPY packages/odp/src packages/odp/src
+COPY packages/odp/tsconfig.json packages/odp/
+COPY packages/odt/src packages/odt/src
+COPY packages/odt/tsconfig.json packages/odt/
+COPY apps/api/tsconfig.json apps/api/
+COPY apps/api/drizzle apps/api/drizzle
+COPY apps/api/src apps/api/src
+COPY --from=web /app/apps/web/dist apps/web/dist
+# Slider's symbols, which the AI searches and draws too (services/icons.ts).
+COPY apps/web/src/features/icons/sets apps/web/src/features/icons/sets
+# The templates Slider brings along (services/slider-templates.ts).
+COPY packages/templates/library packages/templates/library
+
+# Blobs, recordings, the generated secret and – without DATABASE_URL – the PGlite database.
+RUN mkdir -p /data && chown bun:bun /data
+VOLUME ["/data"]
+USER bun
+
+EXPOSE 8787
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["bun", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 8787) + '/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+
+# tini is PID 1: it reaps what LibreOffice leaves behind (soffice.bin is re-parented to PID 1 when
+# its launcher dies, e.g. on the 120 s timeout) and passes signals on to the supervisor.
+# The supervisor runs server.ts and restarts it after settings were saved on /einrichtung; it
+# passes SIGTERM on (server.ts stops running conversions, closes the server and the database).
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["bun", "apps/api/src/supervisor.ts"]

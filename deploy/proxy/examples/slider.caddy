@@ -1,0 +1,17 @@
+# Slider (deploy/docker-compose.yml with docker-compose.shared-proxy.yml). Copy to sites/ and
+# replace the domain. Moved to another domain: the old one after the new one, and the `@moved`
+# matcher and `redir` of deploy/Caddyfile in here, the domain written out for {$SLIDER_DOMAIN}.
+slider.example.com {
+	encode zstd gzip
+	# Slider sets its own security headers (HSTS, nosniff, …) and serves the web app itself.
+	reverse_proxy slider:8787 {
+		# Slider reads the right-most X-Forwarded-For entry (TRUST_PROXY=1): hand it the visitor.
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+# Calls with many people (COMPOSE_PROFILES=call, CALL_DOMAIN in Slider's .env): LiveKit's
+# signalling. DNS-only record (no proxy) – the media goes to the server's own ports.
+call.example.com {
+	reverse_proxy livekit:7880
+}

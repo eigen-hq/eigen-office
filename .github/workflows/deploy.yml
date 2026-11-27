@@ -1,0 +1,99 @@
+name: Deploy
+
+# A release deploys its tag to the production server once publish.yml has finished – its full CI
+# passed; a failed check deploys nothing. Pushes deploy nothing. The desktop apps and the image
+# (release.yml) are not waited for.
+# The product website is not part of it: it deploys on every push to main (deploy-website.yml).
+# The job copies the tagged checkout to /opt/slider on the server, writes deploy/.env from a
+# secret and runs deploy/deploy.sh there (build, restart, wait for the health check). Nothing has
+# to be set up on the server by hand. Runs only in eigen-hq/eigen-office,
+# never in a fork.
+#
+# Repository secrets: DEPLOY_HOST (server IP), DEPLOY_KNOWN_HOSTS (its SSH host key line),
+# DEPLOY_SSH_KEY (private key whose public half is in root's authorized_keys there, prefixed with
+# `restrict `), DEPLOY_ENV (the whole deploy/.env). Repository variable DEPLOY_SETTINGS (optional):
+# more lines for deploy/.env that are no secret.
+
+on:
+  workflow_run:
+    workflows: [Publish]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to deploy again, e.g. v1.2.0
+        required: true
+
+permissions:
+  contents: read
+
+# Deploys queue up instead of cancelling one that is halfway through.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to the server
+    if: >-
+      github.repository == 'eigen-hq/eigen-office' && (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || inputs.tag }}
+          persist-credentials: false
+
+      - name: Set up SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host server\n  HostName %s\n  User root\n  IdentityFile ~/.ssh/deploy\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
+            "$DEPLOY_HOST" > ~/.ssh/config
+
+      # deploy/.env and the company fonts live only on the server; --delete leaves excluded paths alone.
+      - name: Copy the release
+        run: |
+          rsync -az --delete \
+            --exclude=/.git/ --exclude=node_modules/ --exclude=/deploy/.env --exclude=/deploy/fonts/ \
+            ./ server:/opt/slider/
+
+      # DEPLOY_ENV (secret) holds the keys; DEPLOY_SETTINGS (repository variable, optional) adds
+      # settings that are no secret – e.g. COMPOSE_PROFILES=stt and SPEECH_URL – and can be read
+      # and changed without rewriting the whole secret.
+      - name: Write deploy/.env
+        env:
+          DEPLOY_ENV: ${{ secrets.DEPLOY_ENV }}
+          DEPLOY_SETTINGS: ${{ vars.DEPLOY_SETTINGS }}
+          TAG: ${{ github.event.workflow_run.head_branch || inputs.tag }}
+        # COMPOSE_PROFILES named in both are joined (rembg in the secret + stt here = both). Any
+        # other key named in DEPLOY_SETTINGS wins over the secret's line for it, which is left
+        # out – e.g. SLIDER_DOMAIN moved to another address without rewriting the secret.
+        run: |
+          profiles=$(printf '%s\n%s\n' "$DEPLOY_ENV" "$DEPLOY_SETTINGS" |
+            sed -n 's/^COMPOSE_PROFILES=//p' | tr ',' '\n' | sed '/^$/d' | sort -u | paste -sd, -)
+          {
+            printf '%s\n' "$DEPLOY_ENV" | awk '
+              BEGIN {
+                n = split(ENVIRON["DEPLOY_SETTINGS"], lines, "\n")
+                for (i = 1; i <= n; i++)
+                  if (match(lines[i], /^[A-Za-z_][A-Za-z0-9_]*=/)) set[substr(lines[i], 1, RLENGTH - 1)] = 1
+              }
+              { key = $0; sub(/=.*/, "", key) }
+              key != "COMPOSE_PROFILES" && !(key in set)'
+            printf '%s\n' "$DEPLOY_SETTINGS" | awk '!/^COMPOSE_PROFILES=/'
+            if [ -n "$profiles" ]; then printf 'COMPOSE_PROFILES=%s\n' "$profiles"; fi
+            # The release the settings show (Einstellungen → Version).
+            printf 'SLIDER_VERSION=%s\n' "${TAG#v}"
+          } | ssh server 'umask 077 && cat > /opt/slider/deploy/.env'
+
+      - name: Build and start
+        run: ssh server /opt/slider/deploy/deploy.sh

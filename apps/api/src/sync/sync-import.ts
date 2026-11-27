@@ -1,0 +1,697 @@
+import { and, asc, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
+import {
+  fingerprintFromShapes,
+  matchSlides,
+  PptxError,
+  relinkDeletedSlides,
+  svgForRenderHash,
+  trackBoxes,
+  type BoxTarget,
+  type ParsedSlide,
+  type SlideFingerprint,
+  type SlideMatchResult,
+} from '@slider/pptx';
+import {
+  refShape,
+  toSyncSummary,
+  type Anchor,
+  type Shape,
+  type ShapeRef,
+  type SyncSummary,
+} from '@slider/shared';
+import type { Executor } from '../db/client';
+import {
+  comments,
+  decks,
+  revisions,
+  slides,
+  slideVersions,
+  type RevisionDiffRecord,
+  type SlideRenderer,
+} from '../db/schema';
+import {
+  beginImportAttempt,
+  endImportAttempt,
+  ImportCrashLoop,
+  importsStopping,
+} from '../import/attempts';
+import { deleteOrphanSlides, FINGERPRINT_VERSION, sha256Hex, toShape } from '../import/common';
+import { ConversionAborted } from '../import/libreoffice';
+import {
+  hasPdfRenderer,
+  renderSlidePages,
+  slideRenderer,
+  storeSlideRender,
+  type SlidePages,
+} from '../import/office-pages';
+import type { ImportDeps } from '../import/import-deck';
+import { upsertPptxComments, type ImportedSlide } from '../import/pptx-comments';
+import type { ImportJob } from '../import/queue';
+import { deleteBlobs, storageBlobs } from '../services/blob-deletions';
+import { blobKeys } from '../storage/blob-storage';
+import { parseFailedMessage } from './errors';
+import { carryShapeIds } from '../import/pdf-boxes';
+import { isPdfPage, openDeckFile } from '../import/pdf-deck';
+import { PdfTimedOut } from '../import/pdf-jobs';
+import { mergeSyncState } from './state';
+import { scheduleDeckFile } from '../services/cloud/files';
+import { newRevisionToLiveTexts } from '../services/edits/live-texts';
+
+type SlideVersionRow = typeof slideVersions.$inferSelect;
+
+/** A parsed slide's fingerprint, with what the caller knows of it besides the file. */
+const parsedFingerprint = (
+  slide: ParsedSlide,
+  known: Pick<SlideFingerprint, 'key' | 'position'> & {
+    shapes: Shape[];
+    renderHash: string;
+  },
+): SlideFingerprint =>
+  fingerprintFromShapes({
+    key: known.key,
+    // A PDF's pages are matched by what they show: they have no slide id.
+    sldId: isPdfPage(slide) ? null : slide.sldId,
+    position: known.position,
+    title: slide.title,
+    layoutName: slide.layoutName,
+    textHash: slide.textHash,
+    shapes: known.shapes,
+    renderHash: known.renderHash,
+    contentHash: slide.contentHash,
+    creationId: slide.creationId,
+    hidden: slide.hidden,
+  });
+
+/**
+ * The previous revision's fingerprints computed by *this* code from its stored file – not the
+ * hashes stored at its import. Those came from the parser and renderer of back then; after an
+ * update that changes either (e.g. slide-number fields left out of the text hash), every slide
+ * would look "modified" on the next sync, and without exact hashes the renumber guard of slide
+ * matching cannot stop comments from moving to a neighbour. `null` (the stored rows are used)
+ * when they already come from this code (`FINGERPRINT_VERSION`) – the usual case, so a sync
+ * reads one file, not two – or when the file is gone, cannot be read any more or does not match
+ * the stored slides.
+ */
+async function currentFingerprints(
+  deps: ImportDeps,
+  deckId: string,
+  revisionId: string,
+  rows: SlideVersionRow[],
+): Promise<SlideFingerprint[] | null> {
+  if (rows.length === 0) return null;
+  const [revision] = await deps.db
+    .select({ pptxKey: revisions.pptxKey, fingerprintVersion: revisions.fingerprintVersion })
+    .from(revisions)
+    .where(eq(revisions.id, revisionId));
+  // Hashed by this code already: parsing and rendering the old file again would change nothing.
+  if (revision?.fingerprintVersion === FINGERPRINT_VERSION) return null;
+  const bytes = revision?.pptxKey ? await deps.storage.get(revision.pptxKey) : null;
+  if (!bytes) return null;
+  try {
+    const document = await openDeckFile(deps.openPptx, bytes);
+    const parsed = document.presentation.slides;
+    const sameSlides =
+      parsed.length === rows.length &&
+      parsed.every((slide, i) => {
+        const row = rows[i];
+        return row !== undefined && (row.pptxSldId === null || row.pptxSldId === slide.sldId);
+      });
+    if (!sameSlides) return null;
+    const fingerprints: SlideFingerprint[] = [];
+    for (const [i, slide] of parsed.entries()) {
+      const row = rows[i]!;
+      const svg = await document.renderSlideSvg(slide);
+      fingerprints.push(
+        parsedFingerprint(slide, {
+          key: row.slideId,
+          position: row.position,
+          shapes: slide.shapes.map(toShape),
+          renderHash: sha256Hex(svgForRenderHash(svg)),
+        }),
+      );
+    }
+    return fingerprints;
+  } catch (error) {
+    if (error instanceof ConversionAborted) throw error;
+    deps.log.warn(
+      `Deck ${deckId}: previous file could not be read again, matching with stored hashes`,
+      error,
+    );
+    return null;
+  }
+}
+
+/**
+ * Imports a pending revision of a deck that is already in use (BER-107/108/114).
+ *
+ * Unlike the first import it never touches `decks.import_state`: viewers keep the current
+ * revision without an overlay until one transaction flips `current_revision_id`. Slides are
+ * matched to the previous revision, so matched slides keep their Slider id – and with it their
+ * comments. Slides missing from the new file keep their old versions, images and comments.
+ * On failure the pending revision is removed and the error is stored on the deck.
+ */
+export async function importSyncRevision(deps: ImportDeps, job: ImportJob): Promise<void> {
+  const { db, storage, clock } = deps;
+  const { deckId, revisionId } = job;
+  const [revision] = await db
+    .select()
+    .from(revisions)
+    .where(and(eq(revisions.id, revisionId), eq(revisions.deckId, deckId)));
+  if (!revision || revision.status !== 'pending') return;
+  const [deck] = await db.select().from(decks).where(eq(decks.id, deckId));
+  if (!deck) {
+    await storage.deletePrefix(blobKeys.deckPrefix(deckId)).catch(() => {});
+    return;
+  }
+
+  let stopped = false;
+  try {
+    await beginImportAttempt(db, revisionId);
+    const previousRevisionId = deck.currentRevisionId;
+    const previous = previousRevisionId
+      ? await db
+          .select()
+          .from(slideVersions)
+          .where(eq(slideVersions.revisionId, previousRevisionId))
+          .orderBy(asc(slideVersions.position))
+      : [];
+    // Before the new file is opened, so the two documents are never in memory at once.
+    const rebuilt = previousRevisionId
+      ? await currentFingerprints(deps, deckId, previousRevisionId, previous)
+      : null;
+    const bytes = revision.pptxKey ? await storage.get(revision.pptxKey) : null;
+    if (!bytes) throw new Error(`Original file of revision ${revisionId} is missing`);
+    const document = await openDeckFile(deps.openPptx, bytes);
+    const { presentation } = document;
+    const aspectRatio = presentation.size.cx / presentation.size.cy;
+
+    const planned: PlannedSlide[] = [];
+    // Images of an earlier run cut off before publishing (crash, restart): nothing refers to a
+    // pending revision's slides yet, so they go before this run stores its own.
+    await storage.deletePrefix(blobKeys.slideRenderPrefix(deckId, revisionId));
+    // The SVG is rendered either way: its hash is what slide matching compares (BER-108). The
+    // images are stored only after matching, so unchanged slides can keep the ones they have.
+    for (const [position, parsed] of presentation.slides.entries()) {
+      const svg = await document.renderSlideSvg(parsed);
+      const hashed = svgForRenderHash(svg);
+      planned.push({
+        parsed,
+        position,
+        imageKey: '',
+        thumbnailKey: '',
+        shapes: parsed.shapes.map(toShape),
+        renderHash: sha256Hex(hashed),
+        // Slide numbers and dates are left out of the hash: their old image may show stale ones.
+        volatileFields: hashed !== svg,
+        renderer: null,
+      });
+    }
+
+    const toFingerprint = async (row: typeof slideVersions.$inferSelect) => {
+      let renderHash = row.renderHash;
+      if (renderHash === null) {
+        // Rows from before BER-108: hash the stored image once and remember it.
+        const image = await storage.get(row.imageKey);
+        if (image) {
+          renderHash = sha256Hex(image);
+          await db.update(slideVersions).set({ renderHash }).where(eq(slideVersions.id, row.id));
+        }
+      }
+      return fingerprintFromShapes({
+        key: row.slideId,
+        sldId: row.pptxSldId,
+        position: row.position,
+        title: row.title,
+        layoutName: row.layoutName,
+        textHash: row.textHash,
+        shapes: row.shapes,
+        renderHash,
+        contentHash: row.contentHash,
+        creationId: row.creationId,
+        hidden: row.hidden,
+      });
+    };
+    const prevFingerprints: SlideFingerprint[] = rebuilt ?? [];
+    if (!rebuilt) for (const row of previous) prevFingerprints.push(await toFingerprint(row));
+    const fingerprintOf = (slide: PlannedSlide) =>
+      parsedFingerprint(slide.parsed, { ...slide, key: String(slide.position) });
+    let nextFingerprints = planned.map(fingerprintOf);
+    const results = matchSlides(prevFingerprints, nextFingerprints);
+    // A PDF's boxes are measured afresh each version: a page matched to one before takes over its
+    // boxes' ids, so comments bound to a box stay on it (PowerPoint keeps its shape ids itself).
+    if (planned.some((slide) => isPdfPage(slide.parsed))) {
+      const previousShapes = new Map(previous.map((row) => [row.slideId, row.shapes]));
+      for (const result of results) {
+        if (result.prevKey === null || result.nextKey === null) continue;
+        const slide = planned[Number(result.nextKey)];
+        const before = previousShapes.get(result.prevKey);
+        if (slide && before) slide.shapes = carryShapeIds(before, slide.shapes);
+      }
+      nextFingerprints = planned.map(fingerprintOf);
+    }
+    // Where every box of the previous revision went: comments bound to one follow it (BER-111).
+    const boxes = trackBoxes(prevFingerprints, nextFingerprints, results);
+    await storeImages(deps, {
+      deck,
+      revision,
+      bytes,
+      aspectRatio,
+      planned,
+      previous,
+      results,
+      renderSlide: (parsed) => document.renderSlideSvg(parsed),
+    });
+
+    // Slides that were deleted in an earlier revision and came back get their identity – and
+    // with it their comments – back instead of a fresh id.
+    const added = results.filter((result) => result.nextKey !== null && result.prevKey === null);
+    const relinked =
+      added.length > 0
+        ? relinkDeletedSlides(
+            await Promise.all(
+              (await loadEarlierDeletedVersions(deps, deckId, previousRevisionId)).map(
+                toFingerprint,
+              ),
+            ),
+            nextFingerprints.filter((fp) => added.some((result) => result.nextKey === fp.key)),
+          )
+        : new Map<string, string>();
+
+    const slideIdByPosition = new Map<number, string>();
+    const matchedPositions = new Set<number>();
+    const newSlideIds: string[] = [];
+    for (const result of results) {
+      if (result.nextKey === null) continue;
+      const restored = result.prevKey === null ? relinked.get(result.nextKey) : undefined;
+      const slideId = result.prevKey ?? restored ?? crypto.randomUUID();
+      if (result.prevKey === null && !restored) newSlideIds.push(slideId);
+      if (result.prevKey !== null) matchedPositions.add(Number(result.nextKey));
+      slideIdByPosition.set(Number(result.nextKey), slideId);
+    }
+    const slideIdAt = (position: number) => {
+      const id = slideIdByPosition.get(position);
+      if (!id) throw new Error(`Slide ${position} of revision ${revisionId} has no match result`);
+      return id;
+    };
+
+    const diff: RevisionDiffRecord = {
+      previousRevisionId: previousRevisionId ?? '',
+      slides: results.flatMap((result) =>
+        result.nextKey === null || result.status === 'deleted'
+          ? []
+          : [
+              {
+                slideId: slideIdAt(Number(result.nextKey)),
+                status: result.status,
+                moved: result.moved,
+                confidence: result.confidence,
+                matchedBy: result.matchedBy,
+                position: result.position ?? 0,
+                previousPosition: result.previousPosition,
+                ...(result.hiddenChanged ? { hiddenChanged: result.hiddenChanged } : {}),
+              },
+            ],
+      ),
+      deleted: results.flatMap((result) =>
+        result.status === 'deleted' && result.prevKey
+          ? [
+              {
+                slideId: result.prevKey,
+                previousPosition: result.previousPosition ?? 0,
+                confidence: result.confidence,
+              },
+            ]
+          : [],
+      ),
+    };
+
+    const now = clock.now();
+    // PowerPoint comments follow the sldId. With duplicate sldIds in the new file the matched
+    // slide (the original) keeps them, otherwise the first one – never a later copy.
+    const slidesBySldId = new Map<number, ImportedSlide>();
+    const sldIdOwner = new Map<number, number>();
+    for (const slide of planned) {
+      const owner = sldIdOwner.get(slide.parsed.sldId);
+      const takeOver =
+        owner === undefined ||
+        (!matchedPositions.has(owner) && matchedPositions.has(slide.position));
+      if (!takeOver) continue;
+      sldIdOwner.set(slide.parsed.sldId, slide.position);
+      slidesBySldId.set(slide.parsed.sldId, {
+        slideId: slideIdAt(slide.position),
+        shapes: slide.shapes,
+      });
+    }
+
+    await db.transaction(async (tx) => {
+      if (newSlideIds.length > 0) {
+        await tx.insert(slides).values(newSlideIds.map((id) => ({ id, deckId, createdAt: now })));
+      }
+      if (planned.length > 0) {
+        await tx.insert(slideVersions).values(
+          planned.map((slide) => ({
+            id: crypto.randomUUID(),
+            slideId: slideIdAt(slide.position),
+            revisionId,
+            position: slide.position,
+            pptxSldId: isPdfPage(slide.parsed) ? null : slide.parsed.sldId,
+            hidden: slide.parsed.hidden,
+            title: slide.parsed.title,
+            layoutName: slide.parsed.layoutName,
+            textHash: slide.parsed.textHash,
+            contentHash: slide.parsed.contentHash,
+            creationId: slide.parsed.creationId,
+            imageKey: slide.imageKey,
+            thumbnailKey: slide.thumbnailKey,
+            aspectRatio,
+            shapes: slide.shapes,
+            guides: slide.parsed.guides,
+            transition: slide.parsed.transition ?? null,
+            renderHash: slide.renderHash,
+            renderer: slide.renderer,
+          })),
+        );
+      }
+      const commentCounts = await upsertPptxComments(
+        tx,
+        deckId,
+        presentation.comments,
+        slidesBySldId,
+        now,
+      );
+      await carryBoxComments(tx, {
+        deckId,
+        previous: prevFingerprints,
+        boxes,
+        slideIdAt,
+        shapesAt: (position) => planned[position]?.shapes ?? [],
+      });
+      const summary: SyncSummary = toSyncSummary({
+        slidesModified: diff.slides.filter((s) => s.status === 'modified').length,
+        slidesNew: diff.slides.filter((s) => s.status === 'new').length,
+        slidesDeleted: diff.deleted.length,
+        slidesMoved: diff.slides.filter((s) => s.status === 'moved').length,
+        commentsNew: commentCounts.inserted + commentCounts.restored,
+        commentsUpdated: commentCounts.updated,
+        commentsRemoved: commentCounts.removed,
+      });
+      await tx
+        .update(revisions)
+        .set({
+          status: 'ready',
+          diff: previousRevisionId ? diff : null,
+          summary,
+          slideWidthEmu: presentation.size.cx,
+          slideHeightEmu: presentation.size.cy,
+          fileAuthor: presentation.author,
+          fingerprintVersion: FINGERPRINT_VERSION,
+        })
+        .where(eq(revisions.id, revisionId));
+      await tx
+        .update(decks)
+        .set({ currentRevisionId: revisionId, updatedAt: now })
+        .where(eq(decks.id, deckId));
+      await mergeSyncState(tx, deckId, {
+        lastSyncAt: now.toISOString(),
+        lastSyncError: null,
+        importingRevisionId: null,
+      });
+    });
+    deps.log.info(`Deck ${deckId}: revision ${revision.number} imported`);
+    // Its file in Cloud is the new version's file from now on.
+    scheduleDeckFile(deps, deckId);
+    // Texts typed in together right now get what the new file changed in them.
+    const [previousFile] = previousRevisionId
+      ? await db
+          .select({ key: revisions.pptxKey })
+          .from(revisions)
+          .where(eq(revisions.id, previousRevisionId))
+      : [];
+    await newRevisionToLiveTexts(deps, deckId, previousFile?.key ?? null, revision.pptxKey);
+  } catch (error) {
+    if (error instanceof ConversionAborted || importsStopping()) {
+      // Shutdown: the revision stays pending, and the next start imports it again.
+      stopped = true;
+      deps.log.info(`Sync import of deck ${deckId} stopped by shutdown; resumes on the next start`);
+      return;
+    }
+    if (!(error instanceof PptxError)) {
+      deps.log.error(`Sync import of deck ${deckId} revision ${revisionId} failed`, error);
+    }
+    await discardRevision(deps, deckId, revisionId).catch((cleanupError: unknown) =>
+      deps.log.error(`Cleanup of revision ${revisionId} failed`, cleanupError),
+    );
+    const now = clock.now();
+    // The deck keeps its current revision; the error shows until the next pull succeeds.
+    const parseFailed =
+      error instanceof PptxError ||
+      error instanceof ImportCrashLoop ||
+      error instanceof PdfTimedOut;
+    await mergeSyncState(db, deckId, {
+      lastSyncError: {
+        code: parseFailed ? 'parse_failed' : 'internal',
+        message: parseFailedMessage(error),
+        at: now.toISOString(),
+      },
+      importingRevisionId: null,
+    }).catch(() => {});
+  } finally {
+    await endImportAttempt(db, revisionId, { stopped }).catch(() => {});
+  }
+}
+
+/**
+ * The last version of every slide that is missing from the previous revision (deleted at some
+ * point), for {@link relinkDeletedSlides}. Capped to the most recently seen slides.
+ */
+async function loadEarlierDeletedVersions(
+  deps: ImportDeps,
+  deckId: string,
+  previousRevisionId: string | null,
+) {
+  const inPrevious = deps.db
+    .select({ slideId: slideVersions.slideId })
+    .from(slideVersions)
+    .where(eq(slideVersions.revisionId, previousRevisionId ?? ''));
+  const rows = await deps.db
+    .selectDistinctOn([slideVersions.slideId], {
+      version: slideVersions,
+      number: revisions.number,
+    })
+    .from(slideVersions)
+    .innerJoin(revisions, eq(revisions.id, slideVersions.revisionId))
+    .where(
+      and(
+        eq(revisions.deckId, deckId),
+        eq(revisions.status, 'ready'),
+        notInArray(slideVersions.slideId, inPrevious),
+      ),
+    )
+    .orderBy(slideVersions.slideId, desc(revisions.number));
+  return rows
+    .sort((a, b) => b.number - a.number)
+    .slice(0, RELINK_MAX_CANDIDATES)
+    .map((row) => row.version);
+}
+
+/** Upper bound of earlier deleted slides considered for re-linking. */
+const RELINK_MAX_CANDIDATES = 500;
+
+/** Removes a revision that never became current, with its files and the slides only it had. */
+async function discardRevision(deps: ImportDeps, deckId: string, revisionId: string) {
+  await deps.db.transaction(async (tx) => {
+    await tx.delete(revisions).where(eq(revisions.id, revisionId));
+    await deleteOrphanSlides(tx, deckId);
+  });
+  // Retried by the hourly sweep if the store fails now (`blob_deletions`).
+  await deleteBlobs(deps, [
+    { store: 'storage', key: blobKeys.revisionPrefix(deckId, revisionId), prefix: true },
+  ]);
+}
+
+type PlannedSlide = {
+  parsed: ParsedSlide;
+  position: number;
+  imageKey: string;
+  thumbnailKey: string;
+  shapes: Shape[];
+  renderHash: string;
+  /** Its SVG has slide-number or date fields, which the render hash leaves out. */
+  volatileFields: boolean;
+  renderer: SlideRenderer | null;
+};
+
+/**
+ * Whether a matched slide may keep the previous version's image files instead of new copies:
+ * it looks exactly the same (the *stored* hash – the one of the code that drew an SVG preview –
+ * equals the new one, nothing the render cannot see changed, same slide size, no slide-number or
+ * date field the hash leaves out), and its picture
+ * is as good as a new one would be (a PDF renderer drew it, the slide is hidden and gets the
+ * preview anyway, or there is nothing better than the preview to try).
+ */
+function keepsImages(
+  row: SlideVersionRow,
+  slide: PlannedSlide,
+  aspectRatio: number,
+  canRenderBetter: boolean,
+): boolean {
+  if (!row.imageKey || !row.thumbnailKey || row.renderHash !== slide.renderHash) return false;
+  // The hash ignores slide numbers and dates; the stored picture shows the old ones (an insert
+  // above renumbers every later slide without changing its hash).
+  if (slide.volatileFields) return false;
+  if (row.contentHash !== slide.parsed.contentHash) return false;
+  if (Math.abs(row.aspectRatio - aspectRatio) > 1e-9) return false;
+  return (
+    row.renderer === 'office' ||
+    row.renderer === 'libreoffice' ||
+    row.renderer === 'pdf' ||
+    slide.parsed.hidden ||
+    !canRenderBetter
+  );
+}
+
+/**
+ * Fills in each planned slide's image keys and renderer. Slides matched as unchanged (or only
+ * moved) with an identical render keep the previous version's files: the same keys in two
+ * versions. Every code path that deletes slide images checks that no other version still uses
+ * them (`rerender`) or only touches the pending revision's own prefix (a failed import), so the
+ * shared files stay. Only when some slide needs a new picture is the PDF drawn at all.
+ */
+async function storeImages(
+  deps: ImportDeps,
+  input: {
+    deck: typeof decks.$inferSelect;
+    revision: typeof revisions.$inferSelect;
+    bytes: Uint8Array;
+    aspectRatio: number;
+    planned: PlannedSlide[];
+    previous: SlideVersionRow[];
+    results: readonly SlideMatchResult[];
+    renderSlide: (parsed: ParsedSlide) => Promise<string>;
+  },
+): Promise<void> {
+  const { deck, revision, planned } = input;
+  const previousById = new Map(input.previous.map((row) => [row.slideId, row]));
+  const canRenderBetter = hasPdfRenderer(deps);
+  const kept = new Map<number, SlideVersionRow>();
+  for (const result of input.results) {
+    if (result.prevKey === null || result.nextKey === null) continue;
+    if (result.status !== 'unchanged' && result.status !== 'moved') continue;
+    const row = previousById.get(result.prevKey);
+    const slide = planned[Number(result.nextKey)];
+    if (row && slide && keepsImages(row, slide, input.aspectRatio, canRenderBetter))
+      kept.set(slide.position, row);
+  }
+
+  let rendered: SlidePages;
+  if (kept.size === planned.length) {
+    // Nothing looks different: no PDF to draw.
+    rendered = { renderer: null, pages: [] };
+  } else {
+    rendered = await renderSlidePages(
+      deps,
+      deck,
+      revision,
+      input.bytes,
+      planned.map(({ parsed }) => parsed),
+      // Viewers keep the current version meanwhile: an upload's conversion goes first.
+      { priority: 'background' },
+    );
+  }
+
+  for (const slide of planned) {
+    const page = rendered.pages[slide.position] ?? null;
+    const row = kept.get(slide.position);
+    if (row) {
+      // The PDF was drawn for other slides; this slide's new page is not needed.
+      if (page) await deleteBlobs(deps, storageBlobs([page.imageKey, page.thumbnailKey]));
+      slide.imageKey = row.imageKey;
+      slide.thumbnailKey = row.thumbnailKey;
+      slide.renderer = row.renderer;
+      continue;
+    }
+    const svg = page ? '' : await input.renderSlide(slide.parsed);
+    const keys = await storeSlideRender(deps.storage, deck.id, revision.id, svg, page);
+    slide.imageKey = keys.imageKey;
+    slide.thumbnailKey = keys.thumbnailKey;
+    slide.renderer = slideRenderer(rendered, page);
+  }
+}
+
+/**
+ * Comments bound to a box follow the box (BER-111): when {@link trackBoxes} found it on another
+ * slide (cut and pasted, or its old slide was deleted) or under another id, the thread moves
+ * there and its reference points at the shape's new id. A box that is gone leaves its comment
+ * where it is – on a deleted slide that is "Gelöschte Folien". Slider comments only: PowerPoint
+ * comments follow what the file says (`upsertPptxComments`). The stored point or box stays as it
+ * was; the viewer places it on the shape (and shifts drawings along with it).
+ */
+async function carryBoxComments(
+  tx: Executor,
+  input: {
+    deckId: string;
+    previous: readonly SlideFingerprint[];
+    boxes: ReadonlyMap<string, ReadonlyMap<string, BoxTarget | null>>;
+    slideIdAt: (position: number) => string;
+    shapesAt: (position: number) => readonly Shape[];
+  },
+): Promise<void> {
+  const shapesBySlide = new Map(
+    input.previous.map((fp) => [fp.key, (fp.shapes ?? []) as readonly Shape[]]),
+  );
+  const slideIds = [...shapesBySlide.keys()];
+  if (slideIds.length === 0) return;
+  const roots = await tx
+    .select({ id: comments.id, slideId: comments.slideId, anchor: comments.anchor })
+    .from(comments)
+    .where(
+      and(
+        eq(comments.deckId, input.deckId),
+        eq(comments.source, 'app'),
+        isNull(comments.parentId),
+        inArray(comments.slideId, slideIds),
+      ),
+    );
+  for (const root of roots) {
+    const { anchor, slideId: from } = root;
+    if ((anchor.type !== 'point' && anchor.type !== 'rect') || !anchor.shapeRef || !from) continue;
+    const before = shapesBySlide.get(from) ?? [];
+    // Where the shape `ref` is bound to was found now: its slide and shape; `null` when gone.
+    const follow = (ref: ShapeRef) => {
+      const shape = refShape(before, ref);
+      const target = shape && input.boxes.get(from)?.get(shape.id);
+      if (!target) return null;
+      const position = Number(target.key);
+      const found = input.shapesAt(position).find((candidate) => candidate.id === target.shapeId);
+      return found ? { slideId: input.slideIdAt(position), shape: found } : null;
+    };
+    // The reference points at the shape's new id – kept as it was where the shape stayed.
+    const rebind = (ref: ShapeRef, shape: Shape, slideId: string): ShapeRef =>
+      slideId === from && shape.id === ref.shapeId
+        ? ref
+        : { ...ref, shapeId: shape.id, name: shape.name };
+    const main = follow(anchor.shapeRef);
+    const to = main?.slideId ?? from;
+    const shapeRef = main ? rebind(anchor.shapeRef, main.shape, main.slideId) : anchor.shapeRef;
+    // Further boxes of the comment (`more`) go along where their shape went with it; one left
+    // on the slide the comment leaves, or taken elsewhere, is no longer part of it.
+    const more =
+      anchor.type === 'rect' && anchor.more
+        ? anchor.more.flatMap((box) => {
+            const went = box.shapeRef && follow(box.shapeRef);
+            if (went && box.shapeRef)
+              return went.slideId === to
+                ? [{ ...box, shapeRef: rebind(box.shapeRef, went.shape, went.slideId) }]
+                : [];
+            return to === from ? [box] : [];
+          })
+        : undefined;
+    const moved: Anchor =
+      anchor.type === 'rect' && more ? { ...anchor, shapeRef, more } : { ...anchor, shapeRef };
+    if (to === from && JSON.stringify(moved) === JSON.stringify(anchor)) continue;
+    await tx.update(comments).set({ slideId: to, anchor: moved }).where(eq(comments.id, root.id));
+    // Replies live on their root's slide.
+    if (to !== from)
+      await tx.update(comments).set({ slideId: to }).where(eq(comments.parentId, root.id));
+  }
+}

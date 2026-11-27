@@ -1,0 +1,242 @@
+import type { Dict } from './en';
+
+export const fr: Dict = {
+  meta: {
+    title: 'Slider | Des présentations où chacun a son mot à dire',
+    description:
+      'Slider est l’outil de présentation où chacun a son mot à dire. Montrez vos diapositives, recueillez les avis directement dessus et faites-en ensemble une meilleure version, dans le navigateur. Open source, hébergé dans l’UE.',
+    downloadTitle: 'Télécharger',
+    downloadDescription:
+      'Slider en application pour Mac et Linux : fonctionne hors ligne, vos présentations restent sur votre ordinateur, l’IA utilise vos propres clés.',
+  },
+  nav: {
+    login: 'Connexion',
+    start: 'Ouvrir Slider',
+    menu: 'Menu',
+    skip: 'Aller au contenu',
+    language: 'Langue',
+  },
+  /** The hero: one slide, and the visitor asked for their opinion on it. */
+  opinion: {
+    kind: 'Slider est l’outil de présentation où chacun a son mot à dire.',
+    askLead: 'Que pensez-vous de',
+    askMark: 'cette diapositive ?',
+    doneLead: 'Voilà comment',
+    doneMark: 'fonctionne Slider.',
+    doneSub:
+      'Chacun donne son avis directement sur la diapositive. Vous en faites une meilleure version. Dans le navigateur, open source et hébergé dans l’UE.',
+    you: 'Vous',
+    where: 'Cliquez sur la diapositive pour choisir l’endroit.',
+    send: 'Envoyer',
+    working: 'L’IA intègre votre commentaire',
+    revised: 'L’IA a retravaillé la diapositive',
+    version: 'Version 2',
+    again: 'Encore',
+    now: 'à l’instant',
+    slide: {
+      kicker: 'Proposition',
+      title: 'Proposition : un chien au bureau',
+      bullets: [
+        'Des études montrent qu’un chien au bureau peut réduire le stress.',
+        'Un chien nous fait faire des pauses régulières et prendre l’air.',
+        'Nous partageons les frais de nourriture et de vétérinaire en équipe.',
+        'Allergies et peurs sont vérifiées avant, avec un court sondage.',
+        'Période d’essai : trois mois, puis nous votons ensemble.',
+      ],
+      source: 'Réunion d’équipe, point 4',
+    },
+    /** The slides the hero can show, one picked at random per visit, each with what people said and the better version. */
+    scenes: {
+      dog: {
+        people: [
+          { by: 'Lara', text: 'Ouf, ça fait beaucoup de texte.' },
+          { by: 'Paul', text: 'Et il est où, le chien ?!' },
+        ],
+        examples: [
+          'Beaucoup trop de texte.',
+          'Le chien doit être plus grand !',
+          'Que proposez-vous au juste ?',
+        ],
+        chips: ['Trop de texte', 'Chien plus grand !', 'Je suis partant'],
+        statement: 'Adoptons un chien de bureau.',
+        reasons: ['Moins de stress', 'Plus de pauses', 'Essai de 3 mois'],
+        next: 'Essai dès le 1er décembre',
+      },
+      strategy: {
+        people: [
+          { by: 'Ingrid', text: 'Lesquels, les trois ?' },
+          { by: 'Marcel', text: 'Je ne vois que des bulles.' },
+        ],
+        examples: [
+          'Que suis-je censé voir ici ?',
+          'La recommandation en haut.',
+          'Trop de couleurs.',
+        ],
+        chips: ['Trop chargé', 'Recommandation d’abord', 'Convaincu'],
+        statement: 'Trois produits font 80 % de la valeur.',
+        reasons: ['Un seul message', 'Trois bulles', 'Recommandation en haut'],
+        next: 'Céder Contract Services',
+      },
+      lecture: {
+        people: [
+          { by: 'Benni', text: 'Où est l’idée clé ?' },
+          { by: 'Anna', text: 'Les formules sont minuscules.' },
+        ],
+        examples: [
+          'D’abord le graphique, puis la formule.',
+          'Que dois-je retenir ?',
+          'Plus gros, s’il vous plaît.',
+        ],
+        chips: ['Formules trop petites', 'L’idée clé ?', 'Bien expliqué'],
+        statement: 'Plus de dépenses publiques font monter les taux.',
+        reasons: ['Une phrase', 'Grand graphique', 'Formule ensuite'],
+        next: 'La courbe se déplace à droite',
+      },
+      finance: {
+        people: [
+          { by: 'Albert', text: 'Quel est le message ?' },
+          { by: 'Gesa', text: 'Personne ne lit ce tableau.' },
+        ],
+        examples: [
+          'Trop de choses à droite.',
+          'Donnez-moi juste le chiffre.',
+          'D’où vient le +22 ?',
+        ],
+        chips: ['Trop de chiffres', 'Le message ?', 'Ça me va'],
+        statement: 'Les prix battent les coûts de l’énergie.',
+        reasons: ['Un chiffre', 'Grand pont', 'Tableau en annexe'],
+        next: 'EBITDA de 380 à 412 M€',
+      },
+      build: {
+        people: [
+          { by: 'Marlon', text: 'Où est le problème ?' },
+          { by: 'Rose', text: 'Le plan est trop petit.' },
+        ],
+        examples: [
+          'Qu’est-ce qui change pour nous ?',
+          'Montrez seulement la cuisine.',
+          'Quand déménage-t-on ?',
+        ],
+        chips: ['Plan trop petit', 'Qu’est-ce qui change ?', 'Parfait'],
+        statement: 'La cuisine passe au centre.',
+        reasons: ['Une pièce', 'Grand plan', 'Date claire'],
+        next: 'Déménagement en mars',
+      },
+      project: {
+        people: [
+          { by: 'Thomas', text: 'Pourquoi la mise en service glisse ?' },
+          { by: 'Lara', text: 'Trop de barres.' },
+        ],
+        examples: ['De quoi avez-vous besoin ?', 'Seul le rouge compte.', 'Qui décide ?'],
+        chips: ['Trop de barres', 'Besoin de quoi ?', 'Compris'],
+        statement: 'La migration des données freine la mise en service.',
+        reasons: ['Un goulot', 'Les barres rouges', 'Décision vendredi'],
+        next: 'D’ici vendredi : 4 personnes de plus sur la migration',
+      },
+      field: {
+        people: [
+          { by: 'Neven', text: 'Qu’est-ce que ça change pour nous ?' },
+          { by: 'Finnja', text: 'La carte est trop colorée.' },
+        ],
+        examples: ['Combien économise-t-on ?', 'Moins de couleurs, svp.', 'Où est la zone C ?'],
+        chips: ['Trop coloré', 'Et alors ?', 'Fort'],
+        statement: 'Moins d’engrais, plus de rendement.',
+        reasons: ['0,6 t/ha de plus', '12 kg/ha de moins', 'Grande carte'],
+        next: 'L’an prochain, tous les champs ainsi',
+      },
+    },
+    live: 'Cette page est en direct. Cliquez n’importe où et dites ce que vous pensez. Tous ceux qui sont ici le voient.',
+    end: 'Et les autres, ils en pensent quoi ?',
+  },
+  /** Questions, as a stack of slides you drag aside. */
+  questions: {
+    title: 'Des questions ?',
+    hint: 'Faites glisser la diapositive.',
+    next: 'Diapositive suivante',
+    prev: 'Diapositive précédente',
+    cards: [
+      {
+        by: 'Carolin',
+        q: 'Faut-il installer quelque chose ?',
+        a: 'Non. Slider fonctionne dans le navigateur. Un lien suffit, et tout le monde est là.',
+      },
+      {
+        by: 'Anna',
+        q: 'Je peux apporter mon PowerPoint ?',
+        a: 'Oui. Ouvrez vos fichiers PowerPoint et ODF, commentez, modifiez et téléchargez-les à nouveau.',
+      },
+      {
+        by: 'Benni',
+        q: 'Au fait, que fait l’IA ?',
+        a: 'Elle lit tous les commentaires et propose la version suivante. C’est vous qui décidez.',
+      },
+      {
+        by: 'Thomas',
+        q: 'Combien ça coûte ?',
+        a: 'Rien pour les petites équipes. Ensuite un prix fixe par espace de travail, jamais par personne.',
+      },
+      {
+        by: 'Gesa',
+        q: 'Où sont mes données ?',
+        a: 'Dans l’UE, sans traqueurs ni publicité. Ou sur votre propre serveur : Slider est open source.',
+      },
+      {
+        by: 'Robert',
+        q: 'Et vous, qu’en pensez-vous ?',
+        a: 'Cliquez n’importe où sur cette page et dites-le. Tous ceux qui sont là le voient.',
+      },
+    ],
+  },
+  /** Photo credits: „Foto von X auf Unsplash“. */
+  photo: { by: 'Photo de', on: 'sur' },
+  cta: {
+    title: 'Prêt pour votre prochaine présentation.',
+    button: 'Ouvrir Slider',
+  },
+  footer: {
+    tagline: 'Faites passer vos idées.',
+    product: 'Produit',
+    run: 'L’héberger',
+    company: 'Société',
+    source: 'Code source',
+    changelog: 'Nouveautés',
+    contact: 'Contact',
+  },
+  /** The desktop app's download page (not linked until a release carries the files). */
+  download: {
+    title: 'Slider sur votre ordinateur.',
+    sub: 'Le même Slider que dans le navigateur, en application. Il fonctionne hors ligne, vos présentations restent sur cet ordinateur et l’IA utilise vos propres clés.',
+    cardTitle: 'Télécharger Slider',
+    cardBody:
+      'L’application se tient à jour toute seule. Connectée, elle synchronise vos espaces de travail avec le serveur.',
+    macTitle: 'Mac',
+    macButton: 'Télécharger pour Mac',
+    macNote:
+      'Pour les Mac avec puce Apple (M1 ou plus récente) sous macOS 12 ou plus récent. LibreOffice, qui permet à Slider de lire et d’écrire les fichiers de présentation, se charge au premier lancement s’il manque.',
+    linuxTitle: 'Linux',
+    linuxButton: 'Télécharger pour Linux',
+    debButton: 'Télécharger pour Ubuntu et Debian',
+    linuxNote:
+      'Le premier fichier fonctionne sur tout Linux, le second installe Slider comme les autres logiciels. Installez LibreOffice avec votre gestionnaire de paquets, par exemple « sudo apt install libreoffice ».',
+    armNote: 'Un ordinateur avec une puce ARM ?',
+    armLink: 'Les deux existent aussi pour lui.',
+    browser: 'Plutôt dans le navigateur ?',
+    browserButton: 'Ouvrir Slider',
+  },
+  live: {
+    comment: 'Commenter',
+    place: 'Cliquez n’importe où pour commenter, glissez pour encadrer',
+    cancel: 'Échap pour annuler',
+    write: 'Écrire un commentaire…',
+    reply: 'Répondre…',
+    send: 'Envoyer',
+    here: 'ici',
+    you: 'vous',
+    name: 'Votre nom',
+    fades: 'Les commentaires disparaissent après 30 s, sauf si quelqu’un répond.',
+    full: 'Beaucoup de monde en ce moment. Les commentaires sont en pause.',
+    adjectives: ['agile', 'calme', 'vif', 'brave', 'discret', 'malin', 'joyeux', 'curieux'],
+    animals: ['Renard', 'Hibou', 'Lynx', 'Héron', 'Panda', 'Castor', 'Blaireau', 'Loup'],
+    order: 'animal-first',
+  },
+};

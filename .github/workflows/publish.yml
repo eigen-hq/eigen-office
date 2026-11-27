@@ -1,0 +1,32 @@
+name: Publish
+
+# A release published here (eigen-hq/eigen-office) is checked first: the full CI (ci.yml) on its
+# tag. Only when every check passes does anything go out – deploy.yml puts it on the server and
+# release.yml builds the container image and the desktop apps, both waiting for this workflow.
+# Runs only in eigen-hq/eigen-office, never in a fork.
+#
+# The name „Publish“ is what deploy.yml and release.yml wait for: renaming it stops both.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to check (again), e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    if: github.repository == 'eigen-hq/eigen-office'
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.event.release.tag_name || inputs.tag }}

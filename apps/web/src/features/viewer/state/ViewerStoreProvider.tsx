@@ -1,0 +1,135 @@
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
+import { loadStoredBoxMode, storeBoxMode } from '@/lib/preferences/box-mode';
+import { loadStoredSplit, storeSplit } from '@/lib/preferences/split';
+import { loadStoredWideFrames, storeWideFrames } from '@/lib/preferences/wide-frames';
+import { loadWorkPreferences } from '@/lib/preferences/work-preferences';
+import { createStageRegistry, StageRegistryContext } from './stage-registry';
+import { createViewerStore, ViewerStoreContext } from './viewer-store';
+import {
+  nearestShownSlideId,
+  opensWithHiddenSlides,
+  ViewerDataContext,
+  withoutHiddenSlides,
+  type ViewerData,
+} from './viewer-data';
+import {
+  createInitialState,
+  ViewerDispatchContext,
+  ViewerHoverContext,
+  ViewerSetHoverContext,
+  ViewerStateContext,
+} from './viewer-state';
+
+interface ViewerStoreProviderProps {
+  data: ViewerData;
+  initialSlideId: string | null;
+  children: ReactNode;
+}
+
+/**
+ * Provides server data, UI state, the hovered thread and the stage registry as separate contexts. `data` is
+ * the whole deck; the viewer gets it without the slides hidden in PowerPoint unless they show.
+ */
+export function ViewerStoreProvider({
+  data: all,
+  initialSlideId,
+  children,
+}: ViewerStoreProviderProps) {
+  const [store] = useState(() => {
+    // The zooms are read where they happen (`useZoomToRect`), so a change applies at once.
+    const {
+      hideMinimap,
+      autoZoom: _autoZoom,
+      commentZoom: _commentZoom,
+      ...preferences
+    } = loadWorkPreferences();
+    const initial = initialSlideId && all.slideIndex.has(initialSlideId) ? initialSlideId : null;
+    return createViewerStore(
+      createInitialState({
+        activeSlideId:
+          initial ?? all.slides.find((slide) => !slide.hidden)?.id ?? all.slides[0]?.id ?? null,
+        split: loadStoredSplit(),
+        boxMode: loadStoredBoxMode(),
+        wideFrames: loadStoredWideFrames(),
+        ...preferences,
+        showHiddenSlides: opensWithHiddenSlides(all, initial, preferences.showHiddenSlides),
+        showMinimap: !hideMinimap,
+      }),
+    );
+  });
+  const state = useSyncExternalStore(store.subscribe, store.getControls, store.getControls);
+  const dispatch = store.dispatch;
+  const data = useMemo(
+    () => (state.showHiddenSlides ? all : withoutHiddenSlides(all)),
+    [all, state.showHiddenSlides],
+  );
+  const [registry] = useState(createStageRegistry);
+  const [hovered, setHoveredThreadId] = useState<string | null>(null);
+  // A thread deleted meanwhile is hovered no more (until the pointer moves, see `useThreadHover`).
+  const hoveredThreadId = hovered !== null && all.threadById.has(hovered) ? hovered : null;
+
+  // The split is a per-browser preference, not per deck.
+  useEffect(() => storeSplit(state.split), [state.split]);
+  useEffect(() => storeBoxMode(state.boxMode), [state.boxMode]);
+  useEffect(() => storeWideFrames(state.wideFrames), [state.wideFrames]);
+
+  // A new revision keeps the active slide by its stable id. When that slide is gone, the slide
+  // that now stands at its old place takes over (before paint, so nothing points into the void).
+  const lastActiveIndex = useRef(0);
+  const activeIndex = state.activeSlideId ? data.slideIndex.get(state.activeSlideId) : undefined;
+  useEffect(() => {
+    if (activeIndex !== undefined) lastActiveIndex.current = activeIndex;
+  }, [activeIndex]);
+  const activeSlideId = useRef(state.activeSlideId);
+  useEffect(() => {
+    activeSlideId.current = state.activeSlideId;
+  }, [state.activeSlideId]);
+  useLayoutEffect(() => {
+    const { slides } = data;
+    // Hidden just now: the neighbour still shown. Gone with a new revision: whatever slide now
+    // stands at its old place.
+    const fallback =
+      (activeSlideId.current &&
+        nearestShownSlideId(all.slides, data.slideIndex, activeSlideId.current)) ??
+      slides[Math.min(lastActiveIndex.current, slides.length - 1)]?.id ??
+      slides[0]?.id ??
+      null;
+    dispatch({
+      type: 'slidesReplaced',
+      slideIds: slides.map((slide) => slide.id),
+      // A comment begun on a variant is not on a slide gone.
+      variantIds: [...data.variantsOf.values()].flat().map((variant) => variant.id),
+      fallbackSlideId: fallback,
+    });
+  }, [all, data, dispatch]);
+
+  // A thread deleted meanwhile (by someone else, or in another tab): its panel closes instead of
+  // leaving an empty strip on the right.
+  useLayoutEffect(() => {
+    dispatch({ type: 'threadsReplaced', threadIds: new Set(all.threadById.keys()) });
+  }, [all.threadById, dispatch]);
+
+  return (
+    <ViewerDataContext value={data}>
+      <StageRegistryContext value={registry}>
+        <ViewerDispatchContext value={dispatch}>
+          <ViewerSetHoverContext value={setHoveredThreadId}>
+            <ViewerStateContext value={state}>
+              <ViewerStoreContext value={store}>
+                <ViewerHoverContext value={hoveredThreadId}>{children}</ViewerHoverContext>
+              </ViewerStoreContext>
+            </ViewerStateContext>
+          </ViewerSetHoverContext>
+        </ViewerDispatchContext>
+      </StageRegistryContext>
+    </ViewerDataContext>
+  );
+}

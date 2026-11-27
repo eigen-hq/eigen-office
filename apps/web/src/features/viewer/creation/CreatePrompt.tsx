@@ -1,0 +1,338 @@
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { DEFAULT_DECK_KIND, MAX_CREATION_PROMPT_LENGTH } from '@slider/shared';
+import { useHeardWords } from '../voice/hooks/useHeardWords';
+import {
+  clearCreationDraft,
+  loadCreationDraft,
+  saveCreationDraft,
+  type CreationDraft,
+} from './creation-draft';
+import { KindChoice, MasterChoice, PagesChoice, pagesOf } from '@/features/onboarding';
+import {
+  useAttachMaterial,
+  useDeckMaterial,
+  useDismissCreation,
+  useStartCreation,
+  useWorkspaceMasters,
+} from '@/lib/api';
+import { isModEnter } from '@/lib/keyboard';
+import { Button, Icon, IconButton, useFocusLoop } from '@/ui';
+import { useViewerData } from '../state/viewer-data';
+import { useViewerDispatch } from '../state/viewer-state';
+import { useViewerToast } from '../state/viewer-toast';
+
+/**
+ * Folie 1 of a new deck while it is still blank: a large window on the slide to have the AI
+ * build the deck – what it is about, the kind (8 cards, one picked), the workspace's template,
+ * how many slides – and the files given to it (pasted or picked here; always read, never a switch).
+ * „Erstellen“ starts the run (the window closes at once, the progress shows), „Leer anfangen“
+ * closes it for good.
+ */
+interface PromptProps {
+  x: number;
+  w: number;
+  h: number;
+  /** The template picked to begin with: the one the deck is made from, if any. */
+  templateId: string | null;
+}
+
+export function CreatePrompt({ x, w, h, templateId }: PromptProps) {
+  const { deck } = useViewerData();
+  const toast = useViewerToast();
+  const start = useStartCreation(deck.id);
+  const dismiss = useDismissCreation(deck.id);
+  const masters =
+    useWorkspaceMasters(deck.workspaceId).data?.filter((master) => master.format === 'odp') ?? [];
+  const board = useDeckMaterial(deck.id).data;
+  // Files on their way up: named in the line under the field until the server has them.
+  const [sending, setSending] = useState<readonly string[]>([]);
+
+  // What is typed here is kept per deck in the browser – the window goes and comes back (the
+  // editor, the track scrolled away, a reload) with it – until „Erstellen“ or „Leer anfangen“.
+  const [draft, setDraft] = useState(() => loadCreationDraft(deck.id));
+  const change = (next: Partial<CreationDraft>) => setDraft((now) => ({ ...now, ...next }));
+  useEffect(() => saveCreationDraft(deck.id, draft), [deck.id, draft]);
+  const description = draft.description;
+  const setDescription = (update: (now: string) => string) =>
+    setDraft((now) => ({ ...now, description: update(now.description) }));
+  const kind = draft.kind ?? DEFAULT_DECK_KIND;
+  // „Automatisch“ unless a number is set.
+  const byAi = typeof draft.pages !== 'number';
+  const shownPages = typeof draft.pages === 'number' ? draft.pages : pagesOf(kind);
+  // The deck's own template first; one removed meanwhile falls back to none.
+  const wanted = draft.templateId ?? templateId ?? '';
+  const masterId = masters.some((master) => master.id === wanted) ? wanted : '';
+
+  // Speaking to the AI while the window is open: what is said goes into the description, live –
+  // never to the session (the AI must not act on the deck meanwhile).
+  const { voice, listening, lit } = useHeardWords(setDescription, { claim: 'strict' });
+  const canSpeak = !!deck.ai?.available;
+  const speakingOn = voice.status === 'listening' || voice.status === 'paused';
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusLoop(panelRef);
+  const kindsId = useId();
+  const textId = useId();
+
+  const dispatch = useViewerDispatch();
+  const files = board?.materials ?? [];
+  const reading = files.filter((file) => file.readState === 'pending').length;
+  const items = board?.items.length ?? 0;
+  // One just up may still count as on its way for a moment: named once.
+  const names = [
+    ...files.map((file) => file.name),
+    ...sending.filter((name) => !files.some((file) => file.name === name)),
+  ];
+  const named =
+    names.length <= 3
+      ? names.map((name) => `„${name}“`).join(', ')
+      : `${names
+          .slice(0, 2)
+          .map((name) => `„${name}“`)
+          .join(', ')} und ${names.length - 2} weitere`;
+  const materialLine =
+    names.length + items === 0
+      ? 'Noch keine Dateien angehängt.'
+      : `Die KI nutzt ${[
+          names.length > 0 && named,
+          items > 0 && `${items} ${items === 1 ? 'Notiz oder Link' : 'Notizen und Links'}`,
+        ]
+          .filter(Boolean)
+          .join(
+            ', ',
+          )}.${sending.length > 0 ? ` ${sending.length === 1 ? 'Eine Datei wird' : `${sending.length} Dateien werden`} hochgeladen.` : ''}${reading > 0 ? ` ${reading === 1 ? 'Eine Datei wird' : `${reading} Dateien werden`} noch gelesen, die KI wartet darauf.` : ''}`;
+
+  // Not while a file is still on its way: the run would start without it (the line says so).
+  const ready = description.trim().length > 0 && sending.length === 0;
+  const create = () => {
+    if (!ready || start.isPending) return;
+    start.mutate(
+      {
+        description: description.trim(),
+        kind,
+        pages: byAi ? null : shownPages,
+        templateId: masterId || null,
+      },
+      {
+        // Not before the server took it: refused, the window comes back with it.
+        onSuccess: () => clearCreationDraft(deck.id),
+        onError: (error) => toast(error.message, 'danger'),
+      },
+    );
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isModEnter(event)) {
+      event.preventDefault();
+      create();
+    }
+  };
+
+  // Files pasted into the description or picked with the paper clip: into the deck's material,
+  // which the AI reads – the line under the field names them.
+  const attach = useAttachMaterial(deck.id);
+  const picker = useRef<HTMLInputElement>(null);
+  const toMaterial = (list: File[]) => {
+    for (const file of list) {
+      setSending((now) => [...now, file.name]);
+      void attach(file)
+        .catch((error: unknown) =>
+          toast(
+            error instanceof Error ? error.message : `„${file.name}“ nicht angehängt`,
+            'danger',
+          ),
+        )
+        .finally(() =>
+          setSending((now) => {
+            const at = now.indexOf(file.name);
+            return at < 0 ? now : [...now.slice(0, at), ...now.slice(at + 1)];
+          }),
+        );
+    }
+  };
+
+  // The slide itself is the window: its whole area, no card in it. Too small for everything, the
+  // middle scrolls – the text never shrinks – and the actions stay bottom right.
+  return (
+    <div
+      ref={panelRef}
+      role="region"
+      aria-label="Präsentation mit KI erstellen"
+      data-create-prompt
+      data-own-wheel
+      className="@container absolute top-0 z-(--z-raised) flex flex-col overflow-hidden rounded-panel bg-glass-solid text-fg"
+      // Picked tiles and cards look as on Neue Präsentation, not in the viewer's own colour.
+      style={
+        {
+          left: x,
+          width: w,
+          height: h,
+          '--selection': 'initial',
+          '--on-selection': 'initial',
+        } as CSSProperties
+      }
+    >
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pt-6 pb-4 @3xl:px-10 @3xl:pt-9">
+        <header className="flex shrink-0 items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-3 text-fg">
+            <Icon name="autoAwesome" size={20} />
+          </span>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <h2 className="text-lg font-semibold text-fg">Präsentation mit KI erstellen</h2>
+            <p className="text-body text-fg-subtle">
+              Beschreibe, worum es geht. Die KI schreibt eine Gliederung und baut die Folien.
+            </p>
+          </div>
+        </header>
+
+        <div className="grid min-h-0 flex-1 gap-6 @3xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <div className="flex min-h-56 flex-col gap-2">
+            <label htmlFor={textId} className="text-xs font-medium text-fg-muted">
+              Beschreibung
+            </label>
+            <div
+              className="field-well focus-field relative flex min-h-40 flex-1 items-start gap-1 rounded-control py-2.5 pr-1.5 pl-3"
+              // Listening: the AI box's sage edge – the words said land here.
+              style={
+                speakingOn
+                  ? {
+                      boxShadow:
+                        'inset 0 0 0 1px color-mix(in srgb, var(--color-sage) 55%, transparent), 0 0 24px color-mix(in srgb, var(--color-sage) 25%, transparent)',
+                    }
+                  : undefined
+              }
+            >
+              {lit && (
+                <span
+                  aria-hidden
+                  className="ai-rim pointer-events-none absolute -inset-px rounded-[inherit]"
+                />
+              )}
+              <textarea
+                ref={fieldRef}
+                id={textId}
+                value={description}
+                onChange={(event) => change({ description: event.target.value })}
+                onKeyDown={onKeyDown}
+                onPaste={(event) => {
+                  const list = [...event.clipboardData.files];
+                  if (list.length === 0) return;
+                  event.preventDefault();
+                  toMaterial(list);
+                }}
+                maxLength={MAX_CREATION_PROMPT_LENGTH}
+                placeholder={
+                  listening && voice.live
+                    ? 'Sag oder tippe, worum es geht, für wen und was hängen bleiben soll'
+                    : 'Worum geht es, für wen ist sie, was soll hängen bleiben?'
+                }
+                className="block h-full min-w-0 flex-1 resize-none self-stretch bg-transparent text-sm leading-5 text-fg outline-none placeholder:text-fg-subtle"
+              />
+              <input
+                ref={picker}
+                type="file"
+                multiple
+                hidden
+                tabIndex={-1}
+                aria-hidden
+                onChange={(event) => {
+                  const list = [...(event.target.files ?? [])];
+                  event.target.value = '';
+                  toMaterial(list);
+                }}
+              />
+              <IconButton
+                icon="attachFile"
+                label="Datei anhängen"
+                title="Dateien anhängen – oder direkt ins Textfeld einfügen"
+                size="compact"
+                onClick={() => picker.current?.click()}
+              />
+              {canSpeak && (
+                <IconButton
+                  icon={voice.status === 'listening' ? 'pause' : 'mic'}
+                  label={
+                    voice.status === 'listening'
+                      ? 'Pausieren'
+                      : voice.status === 'paused'
+                        ? 'Weiter zuhören'
+                        : 'Beschreibung sprechen'
+                  }
+                  size="compact"
+                  active={voice.status === 'listening'}
+                  onClick={() => {
+                    if (voice.status === 'listening') voice.pause();
+                    else if (voice.status === 'paused') voice.resume();
+                    else voice.toggle();
+                    fieldRef.current?.focus({ preventScroll: true });
+                  }}
+                />
+              )}
+            </div>
+            <p className="flex items-start gap-1.5 text-xs text-fg-subtle">
+              <Icon name="attachFile" size={14} className="mt-px shrink-0" />
+              <span>
+                {materialLine}
+                {/* What it uses, with „Löschen“ for a file given by mistake: „Material“. */}
+                {files.length + items > 0 && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      onClick={() => dispatch({ type: 'materialPanelSet', open: true })}
+                      className="font-medium text-fg-muted underline-offset-2 hover:text-fg hover:underline"
+                    >
+                      Ansehen
+                    </button>
+                  </>
+                )}
+              </span>
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-5">
+            <KindChoice kind={kind} onChange={(next) => change({ kind: next })} />
+
+            {masters.length > 0 && (
+              <MasterChoice
+                compact
+                legend="Stil"
+                name={`${kindsId}-style`}
+                masters={masters}
+                masterId={masterId}
+                onChange={(id) => change({ templateId: id })}
+              />
+            )}
+
+            <PagesChoice
+              pages={shownPages}
+              byAi={byAi}
+              onPages={(pages) => change({ pages })}
+              onByAi={(on) => change({ pages: on ? null : pagesOf(kind) })}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-hairline px-6 py-3 @3xl:px-10">
+        <Button
+          variant="ghost"
+          onClick={() => {
+            clearCreationDraft(deck.id);
+            dismiss.mutate();
+          }}
+        >
+          Leer anfangen
+        </Button>
+        <Button
+          icon="autoAwesome"
+          onClick={create}
+          disabled={!ready}
+          title={ready ? undefined : 'Erst beschreiben, worum es geht'}
+        >
+          Erstellen
+        </Button>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,87 @@
+import { eq } from 'drizzle-orm';
+import type { Context } from 'hono';
+import { createMiddleware } from 'hono/factory';
+import { ACCOUNT_HEADER, type Viewer } from '@slider/shared';
+import { ownerAuthor } from '../authors';
+import { users, type UserRow } from '../db/schema';
+import type { AppDeps } from '../deps';
+import { ApiError } from '../http/errors';
+import { loadSessionUser, type LoadSessionOptions } from './session';
+
+export type ViewerEnv = { Variables: { viewer: Viewer } };
+/** For routes anonymous callers may use too (login, public previews). */
+export type OptionalViewerEnv = { Variables: { viewer: Viewer | null } };
+
+export const unauthorized = () => new ApiError(401, 'unauthorized', 'Bitte melde dich an.');
+
+/**
+ * Resolves who is calling and exposes it as `c.var.viewer`; anonymous callers get 401.
+ * Order: the login session cookie (a signed-in account, `kind: 'owner'`) → with `auth.devLogin`
+ * the dev owner → nobody. There are no guests: every viewer is an account (members only).
+ */
+export function viewerMiddleware(deps: AppDeps) {
+  return createMiddleware<ViewerEnv>(async (c, next) => {
+    const viewer = await resolveViewer(c, deps);
+    if (!viewer) throw unauthorized();
+    c.set('viewer', viewer);
+    await next();
+  });
+}
+
+/** Like {@link viewerMiddleware}, but lets anonymous callers through with `viewer: null`. */
+export function optionalViewerMiddleware(deps: AppDeps) {
+  return createMiddleware<OptionalViewerEnv>(async (c, next) => {
+    c.set('viewer', await resolveViewer(c, deps));
+    await next();
+  });
+}
+
+export async function resolveViewer(
+  c: Context,
+  deps: AppDeps,
+  options?: LoadSessionOptions,
+): Promise<Viewer | null> {
+  const user = await loadSessionUser(c, deps, options);
+  if (user) {
+    // A page loaded for another account of this browser (switched in another tab since): it
+    // must not read or write as this one.
+    const expected = c.req.header(ACCOUNT_HEADER);
+    if (expected && expected !== user.id) {
+      throw new ApiError(
+        409,
+        'account_changed',
+        'In diesem Browser ist jetzt ein anderes Konto aktiv. Die Seite wird neu geladen.',
+      );
+    }
+    return userViewer(user);
+  }
+  if (deps.config.auth.devLogin && deps.ownerId && fromThisMachine(c)) {
+    return loadOwnerViewer(deps, deps.ownerId);
+  }
+  return null;
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+const LOOPBACK_ADDRESS = /^(?:127\.|::1$|::ffff:127\.)/;
+
+/**
+ * The dev login (on by itself outside production when no login is set up) signs in only who
+ * calls from this machine: a loopback host name (the Vite proxy keeps the browser's) over a
+ * loopback connection. A dev server on a reachable address, or behind a proxy that names its
+ * public host, is not open to everyone. No socket: an in-process request (tests).
+ */
+function fromThisMachine(c: Context): boolean {
+  const host = (c.req.header('host') ?? new URL(c.req.url).host).replace(/:\d+$/, '');
+  if (!LOOPBACK_HOSTS.has(host.toLowerCase())) return false;
+  const env = c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined;
+  const remote = env?.incoming?.socket?.remoteAddress;
+  return remote === undefined || LOOPBACK_ADDRESS.test(remote);
+}
+
+export const userViewer = (user: UserRow): Viewer => ({ kind: 'owner', author: ownerAuthor(user) });
+
+async function loadOwnerViewer(deps: AppDeps, userId: string): Promise<Viewer> {
+  const [owner] = await deps.db.select().from(users).where(eq(users.id, userId));
+  if (!owner) throw new Error(`Dev owner ${userId} does not exist`);
+  return userViewer(owner);
+}
