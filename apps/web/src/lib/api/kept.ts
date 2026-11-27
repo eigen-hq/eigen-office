@@ -10,6 +10,9 @@ export const keptKeys = { one: (userId: string, key: string) => ['kept', userId,
 
 const keptPath = (key: string) => `/me/kept/${encodeURIComponent(key)}`;
 
+/** Browser copies on their way up – one upload each, however many places use the key. */
+const goingUp = new Set<string>();
+
 /**
  * What the account keeps under `key` (`packages/shared/src/kept.ts`) – the same on each of its
  * devices, the phone beside the computer among them. `local`: the name of this browser's copy
@@ -76,12 +79,17 @@ export function useKept<T>(
     }
     // Kept in this browser alone so far, by this account: up it goes, for the other devices.
     if (!legacy || others.data === undefined) return;
-    if (others.data.length === 0) {
+    // Read again now: another use of the same key in this render may have sent it up already.
+    if (others.data.length === 0 && readString(local) !== null && !goingUp.has(local)) {
       const before = readJson<T>(local, parse, fallback);
       queryClient.setQueryData(queryKey, before);
       writeJson(own, before);
-      send.mutate(() => before);
-      writeString(local, null);
+      goingUp.add(local);
+      // The browser's copy goes only once the server has it (offline, it is tried next time).
+      send.mutate(() => before, {
+        onSuccess: () => writeString(local, null),
+        onSettled: () => goingUp.delete(local),
+      });
     }
     // Once the server answered (and when what it keeps changes) – not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
