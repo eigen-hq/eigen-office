@@ -105,6 +105,7 @@ import { PriorityMark, StatusMark } from './TodoMarks';
 import { TodoTimeline } from './TodoTimeline';
 import { heldUpBy } from './timeline';
 import { byUrgency, isMine } from './order';
+import { WebTextarea } from '@/lib/links';
 
 /**
  * To-dos as Linear's issues at their simplest. `area` given: that area's, by status – a project's
@@ -2057,8 +2058,9 @@ function TodoDetail({
         <TodoActions todo={todo} button />
         <IconButton icon="close" label="Aufgabe schließen (Esc)" size="sm" onClick={onClose} />
       </header>
+      {/* Scrolls as a whole: nothing in it shrinks (a field would, to nothing, once it is long). */}
       <div
-        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5"
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5 *:shrink-0"
         onKeyDown={(event) => {
           // Esc in a field keeps what was typed (its blur saves) and closes the panel.
           if (event.key === 'Escape' && isTextTarget(event.target)) {
@@ -2091,7 +2093,7 @@ function TodoDetail({
             <PriorityPicker todo={todo} onChange={onChange} labelled />
           </div>
         </PickerLook>
-        <AutosizeTextarea
+        <WebTextarea
           value={words}
           readOnly={!todo.canEdit}
           onChange={(event) => setWords(event.target.value)}

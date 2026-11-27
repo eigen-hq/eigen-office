@@ -63,6 +63,7 @@ import { hiddenIn, sourceOf, useCalendarSource } from './sources';
 import { MeetingField, meetingLinkIn, useCallPlaces } from './MeetingField';
 import { MonthGrid } from './MonthGrid';
 import { RepeatField, ScopeDialog } from './RepeatField';
+import { WebTextarea } from '@/lib/links';
 
 /** A new event's start, from where it was asked for: a day, and on a time grid its minute. */
 export interface NewEvent {
@@ -924,7 +925,7 @@ function Fields({
           className="flex-1 resize-none bg-transparent text-sm text-fg outline-none placeholder:text-fg-faint"
         />
       </div>
-      <AutosizeTextarea
+      <WebTextarea
         value={fields.notes}
         readOnly={!canEdit}
         onChange={(event) => onFields({ ...fields, notes: event.target.value })}
