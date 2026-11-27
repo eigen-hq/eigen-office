@@ -18,7 +18,7 @@ import {
   type WriterOpened,
   type WriterParagraphBlock,
 } from '@slider/shared';
-import { cloudVersions, workspaceMembers } from '../src/db/schema';
+import { cloudVersions, documentAiProposals, workspaceMembers } from '../src/db/schema';
 import { documentAiIdle } from '../src/services/document-ai';
 import { createTestContext, signedInUser, type TestContext } from './helpers';
 
@@ -399,6 +399,19 @@ describe('Writer – text documents', () => {
       { id: proposal!.id, status: 'applied', title: document.title, fileName: document.fileName },
     ]);
     expect(await asks(reviewer.cookie)).toEqual([]);
+    // One left „running“ by a server gone down days ago stays out.
+    const old = new Date(ctx.deps.clock.now().getTime() - 2 * 24 * 60 * 60 * 1000);
+    const stale = crypto.randomUUID();
+    await ctx.deps.db.insert(documentAiProposals).values({
+      id: stale,
+      documentId: document.id,
+      commentId: comment.id,
+      createdBy: ctx.ownerId,
+      createdAt: old,
+      updatedAt: old,
+    });
+    expect((await asks()).map((each) => each.id)).toEqual([proposal!.id]);
+    await ctx.deps.db.delete(documentAiProposals).where(eq(documentAiProposals.id, stale));
     const shown = JSON.stringify(ai.requests.at(-1)?.messages);
     expect(shown).toContain('<p id=\\"w3\\">');
     expect(shown).toContain('Größer denken');

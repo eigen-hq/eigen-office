@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { and, asc, desc, eq, gt, inArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   type Attachment,
@@ -511,7 +511,7 @@ const ASK_LISTED_MS = 24 * 60 * 60 * 1000;
 
 /**
  * One's own asks of a document AI in the workspace, the latest first: those at work and those
- * finished within the day – only in documents one still opens and that are not deleted.
+ * finished within the day (one cut short by a restart reads as failed, `toDtos`) – only in documents one still opens and that are not deleted.
  */
 export async function listOwnDocumentAi(
   deps: AppDeps,
@@ -527,7 +527,8 @@ export async function listOwnDocumentAi(
       and(
         eq(documentAiProposals.createdBy, userId),
         eq(cloudNodes.workspaceId, workspaceId),
-        or(eq(documentAiProposals.status, 'running'), gt(documentAiProposals.updatedAt, since)),
+        // A run is over within `AI_RUNNING_LIMIT_MS`: an older „running“ one died with the server.
+        gt(documentAiProposals.updatedAt, since),
       ),
     )
     .orderBy(desc(documentAiProposals.createdAt), desc(documentAiProposals.id))
