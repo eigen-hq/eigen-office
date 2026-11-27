@@ -83,7 +83,8 @@ test('uploading a PPTX imports it and opens the viewer; its „Material“ lists
   // The card's ⋯ shows on hover; a right click opens the same menu.
   await page.getByRole('link', { name: 'slider-demo' }).first().click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Material' }).click();
-  await expect(page).toHaveURL(new RegExp(`/d/${deckId}$`));
+  // The viewer adds ?slide= once the slide has stayed 300 ms (useSlideUrlSync) – with or without.
+  await expect(page).toHaveURL(new RegExp(`/d/${deckId}(\\?slide=[^&]+)?$`));
   const material = page.locator('[data-material-panel]');
   const entries = material.locator('[data-material-entry]');
   await expect(entries).toHaveCount(2);
