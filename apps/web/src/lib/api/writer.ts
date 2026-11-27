@@ -20,6 +20,7 @@ import {
   type WriterPresence,
 } from '@slider/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { accountHeader, api, apiErrorFromText, unreachableError } from '../api-client';
 import { cloudKeys } from './cloud';
 
@@ -251,8 +252,16 @@ export const deleteDocumentComment = (commentId: string) =>
 // A comment handed to the AI, and what came of it under that comment.
 export const fetchDocumentAiProposals = (documentId: string) =>
   api.get<WriterAiProposal[]>(`${documentPath(documentId)}/ai-proposals`);
-export const createDocumentAiProposal = (documentId: string, input: CreateWriterAiProposalInput) =>
-  api.post<WriterAiProposal>(`${documentPath(documentId)}/ai-proposals`, input);
+/** Who lists one's asks (`useOwnAiAsks`): told when one is made, from whichever bar or comment. */
+const asksMade = new Set<() => void>();
+export const createDocumentAiProposal = async (
+  documentId: string,
+  input: CreateWriterAiProposalInput,
+) => {
+  const made = await api.post<WriterAiProposal>(`${documentPath(documentId)}/ai-proposals`, input);
+  for (const tell of asksMade) tell();
+  return made;
+};
 export const stopDocumentAiProposal = (proposalId: string) =>
   api.post<WriterAiProposal>(`/document-ai-proposals/${proposalId}/stop`, {});
 export const moveDocumentAiProposal = (proposalId: string, action: 'revert' | 'reapply') =>
@@ -262,8 +271,18 @@ export const moveDocumentAiProposal = (proposalId: string, action: 'revert' | 'r
  * One's own asks of a document AI in the workspace – at work, or done within the day. No live
  * stream reaches the side bar: asked again every 2 s while one works, else now and then.
  */
-export const useOwnAiAsks = (workspaceId: string) =>
-  useQuery({
+export function useOwnAiAsks(workspaceId: string) {
+  const queryClient = useQueryClient();
+  // One made anywhere is listed at once, not on the next look.
+  useEffect(() => {
+    const tell = () =>
+      void queryClient.invalidateQueries({ queryKey: writerKeys.asks(workspaceId) });
+    asksMade.add(tell);
+    return () => {
+      asksMade.delete(tell);
+    };
+  }, [queryClient, workspaceId]);
+  return useQuery({
     queryKey: writerKeys.asks(workspaceId),
     queryFn: () =>
       api.get<WriterAiAsk[]>(
@@ -272,6 +291,7 @@ export const useOwnAiAsks = (workspaceId: string) =>
     refetchInterval: (query) =>
       query.state.data?.some((ask) => ask.status === 'running') ? 2_000 : 30_000,
   });
+}
 
 /** Where my caret stands in the document, for the others who have it open. */
 export const sendDocumentPresence = (documentId: string, sel: WriterPresence['sel']) =>

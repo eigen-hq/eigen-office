@@ -165,8 +165,6 @@ export function AgentBar({
         );
         keep(proposal);
         setAskedId(proposal.id);
-        // The side bar's „Agenten“ lists it at once, not on its next look.
-        void queryClient.invalidateQueries({ queryKey: writerKeys.asks(workspaceId) });
       }
       setText('');
     } catch (error) {
