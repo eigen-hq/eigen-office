@@ -2543,11 +2543,12 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   `<https://…>` always the chip, `[Wörter](url)` its words, bare `example.de`/mail/phone a plain
   link. Derived from how it is written – nothing stored per link. Used in Sender messages
   (`LinkedText chips`), comments (`CommentBody`), the AI chat (`rich-text.tsx`), material notes and
-  link rows, PDF comments, pages. Asked only once on screen (`useSeen`), under the workspace of
-  `LinkScope` (app root – `lib/` can't read features). Not for received mail (a fetch could open
-  one-time/unsubscribe links), not in Writer (own engine), not yet in to-do descriptions, event
-  notes, mail compose. Sender showed a card under every message with an address before; now the
-  rule above.
+  link rows, PDF comments, pages, a to-do's description and an event's notes (`WebTextarea`: the
+  shown text while not typing, a click beside a link makes it the field again). Asked only once
+  on screen (`useSeen`), under the workspace of `LinkScope` (app root – `lib/` can't read
+  features). Not for mail – received (a fetch could open one-time/unsubscribe links) or written
+  (the user's call 2026-11-27) – nor in Writer (own engine). Sender showed a card under every
+  message with an address before; now the rule above.
 - Pages: `WebChipNode`/`WebCardNode` (`pages/lib/nodes.tsx`), Markdown in/out via
   `WEB_CHIP_TRANSFORMER`/`WEB_CARD_TRANSFORMER`; a chip alone in its paragraph writes `<url>` (else
   it would read back as a card). `units.ts`'s raw-HTML line test needs a tag name ending in space,
