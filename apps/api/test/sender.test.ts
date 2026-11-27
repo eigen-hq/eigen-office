@@ -2943,6 +2943,10 @@ describe('Sender – the workspace’s messages', () => {
     const shotPng = new Uint8Array(await shot.encode('png'));
     const logoPng = new Uint8Array(await createCanvas(200, 200).encode('png'));
     const linkFetched: string[] = [];
+    // An SVG that names another file, called a PNG and opened by a comment.
+    const disguised =
+      '<!-- x --><svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+      '<image href="https://elsewhere.example/a.png" width="64" height="64"/></svg>';
     const htmlPage = (html: string) => () =>
       new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     const linkSites: Record<string, () => Response> = {
@@ -2963,6 +2967,13 @@ describe('Sender – the workspace’s messages', () => {
         new Response(logoPng, { headers: { 'content-type': 'image/png' } }),
       'https://firma.example/logo.png': () =>
         new Response(logoPng, { headers: { 'content-type': 'image/png' } }),
+      'https://svg.example/': htmlPage(
+        '<title>SVG</title><meta property="og:image" content="/p.png"><link rel="icon" href="/i.png">',
+      ),
+      'https://svg.example/p.png': () =>
+        new Response(disguised, { headers: { 'content-type': 'image/png' } }),
+      'https://svg.example/i.png': () =>
+        new Response(disguised, { headers: { 'content-type': 'image/png' } }),
     };
     Object.assign(ctx.deps.linkPreviews ?? {}, {
       lookup: async (host: string) => [
@@ -3008,6 +3019,11 @@ describe('Sender – the workspace’s messages', () => {
     expect((await card('https://news.example/artikel?id=7')).status).toBe(200);
     // An address whose hash begins with `_` (a key segment that the storage refuses in base64url).
     expect((await card('https://www.figma.com')).status).toBe(204);
+    // An SVG drawn neither as the card's picture nor as its icon, whatever it is called.
+    expect(await ok<LinkPreview>(card('https://svg.example/'))).toMatchObject({
+      image: null,
+      icon: false,
+    });
     for (const refused of [
       'http://news.example/',
       'https://www.lan-firma.de/',
@@ -3024,6 +3040,10 @@ describe('Sender – the workspace’s messages', () => {
       'https://news.example/favicon.ico',
       'https://nur-titel.example/',
       'https://nur-titel.example/favicon.ico',
+      'https://svg.example/',
+      'https://svg.example/favicon.ico',
+      'https://svg.example/i.png',
+      'https://svg.example/p.png',
       'https://www.figma.com/',
     ]);
     // None found is kept a day, a logo seven.

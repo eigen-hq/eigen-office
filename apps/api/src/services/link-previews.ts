@@ -32,8 +32,10 @@ const IMAGE_WIDTH = 640;
 /** A picture this wide (px) and this much wider than tall fills the card's banner (1.91 : 1). */
 const WIDE_MIN_WIDTH = 400;
 const WIDE_MIN_RATIO = 1.4;
-/** One lookup at most (the page, its picture); what takes longer counts as none. */
-const LOOKUP_TIMEOUT_MS = 10_000;
+/** The page at most; what takes longer counts as none. */
+const PAGE_TIMEOUT_MS = 6_000;
+/** Its picture and its icon at most, each: what takes longer is left out, the words kept. */
+const ASSET_TIMEOUT_MS = 4_000;
 const MAX_TITLE = 200;
 const MAX_DESCRIPTION = 300;
 const MAX_ICON_BYTES = 256 * 1024;
@@ -100,9 +102,7 @@ export async function linkPreview(
   if (already) return already;
   if (!mayLookUp()) return null;
   const run = (async () => {
-    const found = await withTimeout(lookUp(deps, url, written, key), LOOKUP_TIMEOUT_MS).catch(
-      () => null,
-    );
+    const found = await lookUp(deps, url, written, key).catch(() => null);
     const entry: Kept = { at: deps.clock.now().getTime(), preview: found };
     await deps.storage.put(`${key}.json`, new TextEncoder().encode(JSON.stringify(entry)));
     if (!found?.image) await deps.storage.delete(`${key}.jpg`).catch(() => undefined);
@@ -183,6 +183,33 @@ async function lookUp(
   written: string,
   key: string,
 ): Promise<LinkPreview | null> {
+  const head = await withTimeout(readHead(deps, url), PAGE_TIMEOUT_MS);
+  if (!head) return null;
+  const { html, final } = head;
+  const page = readPage(html);
+  if (!page.title) return null;
+  // Each on its own clock: a hanging icon costs the icon, not the card. Kept only after both, so
+  // nothing comes in after the answer.
+  const [picture, icon] = await Promise.all([
+    page.image
+      ? withTimeout(pictureOf(deps, page.image, final), ASSET_TIMEOUT_MS).catch(() => null)
+      : null,
+    withTimeout(iconOf(deps, html, final), ASSET_TIMEOUT_MS).catch(() => null),
+  ]);
+  if (picture) await deps.storage.put(`${key}.jpg`, picture.bytes);
+  if (icon) await deps.storage.put(`${key}.icon.png`, icon);
+  return {
+    url: written,
+    title: page.title,
+    description: page.description,
+    site: page.site ?? final.hostname.replace(/^www\./, ''),
+    image: picture?.shape ?? null,
+    icon: !!icon,
+  };
+}
+
+/** The page's head as HTML, and where it was found; `null`: no HTML page. */
+async function readHead(deps: AppDeps, url: URL): Promise<{ html: string; final: URL } | null> {
   const { response, url: final } = await safeFetch(
     url,
     { ...network(deps), maxBytes: MAX_PAGE_BYTES },
@@ -199,23 +226,28 @@ async function lookUp(
     await response.body?.cancel();
     return null;
   }
-  const html = decode(await readStart(response, MAX_PAGE_BYTES), type);
-  const page = readPage(html);
-  if (!page.title) return null;
-  const [picture, icon] = await Promise.all([
-    page.image ? pictureOf(deps, page.image, final) : null,
-    iconOf(deps, html, final),
-  ]);
-  if (picture) await deps.storage.put(`${key}.jpg`, picture.bytes);
-  if (icon) await deps.storage.put(`${key}.icon.png`, icon);
-  return {
-    url: written,
-    title: page.title,
-    description: page.description,
-    site: page.site ?? final.hostname.replace(/^www\./, ''),
-    image: picture?.shape ?? null,
-    icon: !!icon,
-  };
+  return { html: decode(await readStart(response, MAX_PAGE_BYTES), type), final };
+}
+
+/**
+ * A picture by its first bytes (PNG, JPEG, GIF, WebP, ICO/CUR, BMP, AVIF/HEIF): anything else –
+ * an SVG however it begins or whatever it is called – is not drawn as one.
+ */
+function isRaster(bytes: Uint8Array): boolean {
+  const at = (offset: number, ...values: number[]) =>
+    values.every((value, index) => bytes[offset + index] === value);
+  const ascii = (offset: number, text: string) =>
+    at(offset, ...[...text].map((char) => char.charCodeAt(0)));
+  return (
+    at(0, 0x89, 0x50, 0x4e, 0x47) ||
+    at(0, 0xff, 0xd8, 0xff) ||
+    ascii(0, 'GIF8') ||
+    (ascii(0, 'RIFF') && ascii(8, 'WEBP')) ||
+    at(0, 0, 0, 1, 0) ||
+    at(0, 0, 0, 2, 0) ||
+    ascii(0, 'BM') ||
+    ascii(4, 'ftyp')
+  );
 }
 
 /** The first `max` bytes of the body; the rest is left unread. */
@@ -385,10 +417,8 @@ async function iconOf(deps: AppDeps, html: string, base: URL): Promise<Uint8Arra
         continue;
       }
       let bytes = await readBodyCapped(response, MAX_ICON_BYTES);
-      if (
-        type.includes('svg') ||
-        /^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(new TextDecoder().decode(bytes.subarray(0, 512)))
-      ) {
+      // Not a picture by its bytes: drawn only as an SVG with nothing in it that runs or loads.
+      if (!isRaster(bytes)) {
         const svg = safeSvg(new TextDecoder().decode(bytes));
         if (!svg) continue;
         bytes = new TextEncoder().encode(svg);
@@ -439,6 +469,8 @@ async function pictureOf(
       return null;
     }
     const bytes = await readBodyCapped(response, MAX_IMAGE_BYTES);
+    // An SVG under another name is no picture here either.
+    if (!isRaster(bytes)) return null;
     const image = await loadImage(bytes, MAX_IMAGE_PIXELS);
     if (!image.width || !image.height) return null;
     const scale = Math.min(1, IMAGE_WIDTH / image.width);
