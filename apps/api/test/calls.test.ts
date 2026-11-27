@@ -237,18 +237,9 @@ describe('Calls – in a conversation, heard on every page', () => {
     // saying it again, the tab really worked at wins.
     let at = 0;
     const hub = new CompanionHub(() => at);
-    hub.connect(
-      'u',
-      'zombie',
-      () => {},
-      () => {},
-    );
-    hub.connect(
-      'u',
-      'real',
-      () => {},
-      () => {},
-    );
+    const answers = () => true;
+    const leaveZombie = hub.connect('u', 'zombie', () => {}, answers);
+    const leaveReal = hub.connect('u', 'real', () => {}, answers);
     hub.report('u', { peerId: 'zombie', device: 'desk', active: true, view: { ...view, show } });
     at = 1_000;
     hub.report('u', { peerId: 'real', device: 'desk', active: true, view: { ...view, id: 'b' } });
@@ -258,6 +249,12 @@ describe('Calls – in a conversation, heard on every page', () => {
     expect(hub.deskOf('u')).toMatchObject({ view: { id: 'b' }, active: true });
     at = 200_000;
     expect(hub.deskOf('u')).toMatchObject({ view: { id: 'b' }, active: false });
+    // A tab closed (after it reported) leaves; the last one gone, nothing is asked of anyone.
+    leaveReal();
+    expect(hub.deskOf('u')?.view.id).toBe('thread-1');
+    leaveZombie();
+    expect(hub.deskOf('u')).toBeNull();
+    expect(hub.command('u', { type: 'open', path: '/w/x' })).toBe(false);
 
     // Ben answers: he connects to Anna's tab; it rings no more.
     const answered = (await (

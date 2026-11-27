@@ -278,10 +278,11 @@ export function callRoutes(
                 .catch(() => {});
             },
             (command) => {
-              if (!open()) return;
+              if (!open()) return false;
               stream
                 .writeSSE({ event: COMPANION_COMMAND_SSE_EVENT, data: JSON.stringify(command) })
                 .catch(() => {});
+              return true;
             },
           );
           stream.onAbort(() => {
@@ -294,6 +295,8 @@ export function callRoutes(
             while (open()) {
               await stream.sleep(HEARTBEAT_MS);
               if (!open()) break;
+              // In use or presenting of a tab that stopped saying so runs out: heard now.
+              companion.refresh(userId);
               if (Date.now() - checkedAt >= ACCESS_CHECK_MS) {
                 checkedAt = Date.now();
                 const current = await resolveViewer(c, deps, { readOnly: true }).catch(() => null);

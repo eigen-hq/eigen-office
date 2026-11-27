@@ -11,8 +11,8 @@ import {
 /** A tab of a signed-in person: its stream (once open) and what it last said of itself. */
 interface Tab {
   send: ((event: CompanionEvent) => void) | null;
-  /** Hands this tab what the phone asks of it (`command`). */
-  ask: ((command: CompanionCommand) => void) | null;
+  /** Hands this tab what the phone asks of it (`command`); `false`: its stream is gone. */
+  ask: ((command: CompanionCommand) => boolean) | null;
   device: CompanionReport['device'];
   active: boolean;
   /** When it was last in front or changed its page. */
@@ -48,7 +48,7 @@ export class CompanionHub {
     userId: string,
     peerId: string,
     send: (event: CompanionEvent) => void,
-    ask: (command: CompanionCommand) => void,
+    ask: (command: CompanionCommand) => boolean,
   ): () => void {
     const tabs = this.tabsOf(userId);
     const tab = tabs.get(peerId) ?? {
@@ -81,16 +81,26 @@ export class CompanionHub {
       !before ||
       report.active !== before.active ||
       JSON.stringify(view) !== JSON.stringify(before.view);
-    tabs.set(report.peerId, {
-      send: before?.send ?? null,
-      ask: before?.ask ?? null,
+    const now = this.now();
+    // Changed in place: the stream's cleanup (`connect`) knows its tab by this object.
+    const tab = before ?? { send: null, ask: null, at: now };
+    Object.assign(tab, {
       device: report.device,
       active: report.active,
-      at: moved || report.active ? this.now() : before.at,
-      toldAt: this.now(),
+      at: moved || report.active ? now : tab.at,
+      toldAt: now,
       view,
     });
+    tabs.set(report.peerId, tab as Tab);
     this.changed(userId);
+  }
+
+  /**
+   * Said again as time passes (each stream's heartbeat): in use or presenting runs out without a
+   * report (`live`) – the phone hears it then, not on the next change.
+   */
+  refresh(userId: string) {
+    if (this.people.has(userId)) this.changed(userId);
   }
 
   /** The desk the person last worked at: the newest desk tab with a page, not left too long. */
@@ -115,8 +125,7 @@ export class CompanionHub {
     const tab = this.deskTab(userId);
     if (!tab?.ask) return false;
     try {
-      tab.ask(command);
-      return true;
+      return tab.ask(command);
     } catch {
       return false;
     }
@@ -129,7 +138,8 @@ export class CompanionHub {
   private deskTab(userId: string): Tab | null {
     const now = this.now();
     let best: Tab | null = null;
-    for (const [peerId, tab] of this.tabsOf(userId)) {
+    // Read, not made: a person without tabs is not kept in memory for asking.
+    for (const [peerId, tab] of this.people.get(userId) ?? []) {
       // A report whose stream never came (the tab went before it opened) – forgotten.
       if (!tab.send && now - tab.at > UNSTREAMED_MS) {
         this.people.get(userId)?.delete(peerId);
