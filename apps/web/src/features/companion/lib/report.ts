@@ -1,7 +1,9 @@
 import { COMPANION_RECENT_MS, type CompanionReport, type CompanionView } from '@slider/shared';
-import { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { matchPath, useLocation } from 'react-router';
 import { useCallsOrNull } from '@/features/calls';
+import { queryKeys, readerKeys, writerKeys } from '@/lib/api';
 import { api } from '@/lib/api-client';
 import { onCallHere, ownCallHere } from '@/lib/call-here';
 import { useCompanionHeard } from '@/lib/companion';
@@ -50,6 +52,40 @@ function useInUse(on: boolean): boolean {
 }
 
 /**
+ * The workspace of the presentation, document or PDF open – their addresses (`/d/`, `/t/`, `/r/`)
+ * name none: read from what the page loaded (no request of its own).
+ */
+function useOpenedWorkspace(pathname: string): string | null {
+  const queryClient = useQueryClient();
+  const deck = matchPath('/d/:id', pathname)?.params.id;
+  const document = matchPath('/t/:id', pathname)?.params.id;
+  const pdf = matchPath('/r/:id', pathname)?.params.id;
+  const read = (): string | null => {
+    if (deck)
+      return (
+        queryClient.getQueryData<{ workspaceId: string }>(queryKeys.deck(deck))?.workspaceId ?? null
+      );
+    if (document)
+      return (
+        queryClient.getQueryData<{ document: { workspaceId: string } }>(
+          writerKeys.document(document),
+        )?.document.workspaceId ?? null
+      );
+    if (pdf)
+      return (
+        queryClient.getQueryData<{ pdf: { workspaceId: string } }>(readerKeys.pdf(pdf))?.pdf
+          .workspaceId ?? null
+      );
+    return null;
+  };
+  return useSyncExternalStore(
+    (changed) => queryClient.getQueryCache().subscribe(changed),
+    read,
+    read,
+  );
+}
+
+/**
  * The page's title as its tab says it, without what follows it – the workspace, the app
  * („Angebot | Mein Workspace | Cloud“ → „Angebot“) – and the count of the unread before it
  * („(3) Sender“).
@@ -72,6 +108,7 @@ export function useReportView(phone: boolean) {
   const { opened } = useCompanionHeard();
   const location = useLocation();
   const workspace = useActiveWorkspace();
+  const openedWorkspace = useOpenedWorkspace(location.pathname);
   const inUse = useInUse(!phone && signedIn);
   const [lines, setLines] = useState(ownCallHere);
   const [title, setTitle] = useState(() => (typeof document === 'undefined' ? '' : pageTitle()));
@@ -90,7 +127,13 @@ export function useReportView(phone: boolean) {
 
   const view: CompanionView | null = phone
     ? null
-    : viewOf(location.pathname, location.search, title, lines, workspace?.id ?? null);
+    : viewOf(
+        location.pathname,
+        location.search,
+        title,
+        lines,
+        openedWorkspace ?? workspace?.id ?? null,
+      );
   const report: CompanionReport | null = peerId
     ? { peerId, device: phone ? 'phone' : 'desk', active: phone ? false : inUse, view }
     : null;
