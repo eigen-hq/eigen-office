@@ -1722,17 +1722,39 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   `getEditorState().read` (throws „Unable to find an active editor“). Speech checked with
   Chromium's `--use-file-for-fake-audio-capture=<wav>` (a `say -o` file at 48 kHz).
 - Drawing by hand („/Zeichnung“, `lib/ink.ts`, `components/InkBlock.tsx`): a fenced block
-  ```` ```ink <height> ````, one stroke a line `<pen|marker> <text|accent> <width> x y x y …`
-  (whole numbers in a 1000-wide frame), kept byte-exact as `RawBlockNode(…, 'ink')` like a
-  table – a stroke drawn is one line more before the fence, a stroke wiped one line less, so
-  `PageSync` sends only those. Over 1500 points a stroke goes on in a line of its own (the
-  20 000-char line cap). Drawn only in Bearbeiten (the block's own toolbar: Stift, Marker,
-  Radierer, colours), mouse and pen; touch scrolls (`touch-action: pan-y`), a stylus `touchstart`
-  is prevented so iPad Safari does not scroll while writing; the pen's eraser button (buttons &
-  32) wipes. Near its foot it grows by 240; the grip sets its height. Read, it is as tall as its
-  ink and gone when empty. The AI never sees the strokes (`inkStrokeLines` in shared,
-  `documentForPrompt` drops them; the note tells it to keep the fences), nor does the search
-  (`searchText`). Checked with the mouse in Chromium; a real Apple Pencil not yet.
+  ```` ```ink <height> ```` kept byte-exact as `RawBlockNode(…, 'ink')` like a table – a stroke
+  drawn is one line more before the fence, a stroke wiped one line less, so `PageSync` sends only
+  those. Lines (1000-wide frame): `draw <pen|marker> <text|accent> <width> x y force …` (force
+  1–100, 0 = mouse, no pressure), `more x y force …` goes on past the 18 000-char line cap,
+  `shape <tool> <color> <width> x y …` a held stroke snapped true (`lib/shapes.ts`: hold 550 ms
+  still → line squared to 45°, box, polygon ≤ 6 corners, circle/ellipse), `text <mark> <words>`
+  what the handwriting says (last line before the fence). 1.6.18's `pen|marker color width x y …`
+  still reads. Strokes are perfect-freehand outlines (`simulatePressure` when no force), live
+  path set imperatively per frame from coalesced + 2 predicted points, outlines cached per line.
+  One pen for every drawing (`lib/pen.ts`, a store): Stift, Marker, Lasso (moves, recolours,
+  ⌫ deletes; ≥ 60 % of a stroke's points inside), Radierer „Ganze Striche“/„Genau“ (splits); its
+  palette floats above the drawing drawn in (`pen.at`). The pen's eraser button (buttons & 32)
+  wipes. Near its foot it grows by 240; the grip sets its height. Read, it is as tall as its ink
+  and gone when empty.
+- The Pencil writes anywhere (`components/PenCatcher.tsx`), only where `(any-pointer: coarse)`
+  (a desk's Wacom stays a mouse, „/Zeichnung“ only): a pen moved > 4 px where no drawing is makes
+  one (before the block under it, at the end, or the drawing within 56 px made taller / given
+  room above its strokes – `liftInk`), switches Lesen → Bearbeiten first (`onEdit`, then the next
+  frame), scrolls back by the drift and hands the stroke over (`pen.start`, `claimPenStart`). A
+  tap places the caret (`caretRangeFromPoint`) or follows a link. Stylus `touchstart`/`touchmove`
+  are prevented (no scroll, no Scribble – the tldraw/Excalidraw way); a finger scrolls. Checked
+  with a CDP pen in Chromium only; on an iPad (Scribble, Safari's scroll cancel, palm) not yet.
+  Pencil double-tap/squeeze does not reach the web.
+- Handwriting read (`components/InkReader.tsx`, `lib/ink-read.ts`, API `POST
+  /documents/:id/ink-text` → `services/ink-text.ts`, feature `handwriting`): a drawing drawn in
+  this session is read 2.5 s after the pen rests – its strokes as a PNG (dark on white, cut to the
+  ink), the words written as the `text` line with its strokes' mark (`strokesMark`), in
+  `history-merge` + `ink-read` tags (no undo step; `PageEditor` sends it in Lesen too). A sketch
+  keeps `text <mark>` with no words, so it is not read again; opening a page reads nothing.
+  „Als Text kopieren“ (ClipboardItem with a promise – Safari's gesture) and „In Text umwandeln“
+  (paragraphs for its lines, the drawing gone) read at once when the mark is stale. No AI (409):
+  nothing more asked that session. The AI and the search never see the strokes (`inkStrokeLines`
+  in shared, `documentForPrompt`, `searchText`) but do see the `text` line.
 
 ## Diagrams – drawn files (`features/diagrams/`, `services/diagrams.ts`, `packages/shared/src/diagram.ts`)
 
