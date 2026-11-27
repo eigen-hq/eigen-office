@@ -12,6 +12,8 @@ function createWindows(deps: AppDeps) {
   return {
     // Each AI request runs on the workspace's AI key: a person asks a few a minute at most.
     aiRequests: perMinute(20),
+    // A page's handwriting is read each time the pen rests: its own budget, beside the asked ones.
+    inkReads: perMinute(30),
     // A deck is built a few times a day at most; a script asking again and again is stopped.
     deckCreations: perMinute(6),
     // „Fragen“ on the material page: each answer reads up to a dozen turns of material.

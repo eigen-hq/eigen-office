@@ -598,6 +598,17 @@ describe('Writer – text documents', () => {
     expect(read.status).toBe(200);
     expect(await read.json()).toEqual({ text: 'Milch\nEier' });
     expect(JSON.stringify(ai.requests.at(-1))).toContain('image/png');
+    // A tall drawing in bands, top to bottom: one turn, every band a picture.
+    ai.steps = [[{ type: 'text', text: '-' } as Anthropic.Beta.BetaContentBlock]];
+    const bands = new FormData();
+    bands.append('band', new Blob([png], { type: 'image/png' }), 'band.png');
+    bands.append('band', new Blob([png], { type: 'image/png' }), 'band.png');
+    const banded = await ctx.request(`/api/documents/${document.id}/ink-text`, {
+      method: 'POST',
+      body: bands,
+    });
+    expect(await banded.json()).toEqual({ text: '' });
+    expect(JSON.stringify(ai.requests.at(-1)).match(/image\/png/g)).toHaveLength(2);
     const notPicture = await ctx.request(`/api/documents/${document.id}/ink-text`, {
       method: 'POST',
       headers: { 'content-type': 'image/png' },

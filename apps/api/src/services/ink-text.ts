@@ -12,13 +12,15 @@ import { workspaceAiConnection } from './integration-keys';
  * search and the page's AI, copied or turned into text by hand. Nothing is kept here.
  */
 
-/** A drawing's picture is a few hundred kilobytes; more is no drawing. */
-export const MAX_INK_PICTURE_BYTES = 4 * 1024 * 1024;
+/** A drawing's pictures (a band each) are a few hundred kilobytes; more is no drawing. */
+export const MAX_INK_PICTURE_BYTES = 16 * 1024 * 1024;
+/** A tall drawing comes in bands, top to bottom: this many at most. */
+export const MAX_INK_BANDS = 8;
 /** The most text one drawing gives back. */
 const MAX_INK_TEXT = 4000;
 const NOTHING = '-';
 
-const SYSTEM = `You read handwriting. The picture is a drawing from a note page: handwritten words, maybe sketches, arrows, boxes, underlines.
+const SYSTEM = `You read handwriting. The picture is a drawing from a note page (a tall one comes as several pictures, top to bottom, one band each – read them as one page): handwritten words, maybe sketches, arrows, boxes, underlines.
 
 Write out the handwritten words exactly as written, in their own language and spelling – no translation, no correction, no comment. Keep the lines as they are (one line of writing, one line of text). A list stays a list ("- " before each item where the writing has a bullet or dash). Shapes and sketches without words are left out; words inside or beside them are written out.
 
@@ -28,10 +30,14 @@ export async function readInk(
   deps: AppDeps,
   userId: string,
   documentId: string,
-  bytes: Uint8Array,
+  bands: readonly Uint8Array[],
 ): Promise<{ text: string }> {
-  const type = imageMediaType(bytes);
-  if (type !== 'image/png') throw badRequest('Das ist kein Bild einer Zeichnung.');
+  if (bands.length === 0 || bands.length > MAX_INK_BANDS)
+    throw badRequest('Das ist kein Bild einer Zeichnung.');
+  for (const band of bands) {
+    if (imageMediaType(band) !== 'image/png')
+      throw badRequest('Das ist kein Bild einer Zeichnung.');
+  }
   const { node } = await loadDocument(deps, userId, documentId, 'edit');
   const found = await workspaceAiConnection(deps, node.workspaceId);
   if (!found.connection) throw new ApiError(409, 'ai_not_configured', found.error);
@@ -39,14 +45,20 @@ export async function readInk(
   const timer = setTimeout(() => controller.abort(), 60_000);
   timer.unref?.();
   try {
-    const picture: Anthropic.Beta.BetaContentBlockParam = {
+    const pictures: Anthropic.Beta.BetaContentBlockParam[] = bands.map((band) => ({
       type: 'image',
-      source: { type: 'base64', media_type: type, data: Buffer.from(bytes).toString('base64') },
-    };
+      source: {
+        type: 'base64',
+        media_type: 'image/png',
+        data: Buffer.from(band).toString('base64'),
+      },
+    }));
     const result = await runTurn(deps, found.connection, {
       system: SYSTEM,
       tools: [],
-      messages: [{ role: 'user', content: [picture, { type: 'text', text: 'What does it say?' }] }],
+      messages: [
+        { role: 'user', content: [...pictures, { type: 'text', text: 'What does it say?' }] },
+      ],
       taskBudgetTokens: 20_000,
       effort: 'low',
       feature: 'handwriting',
