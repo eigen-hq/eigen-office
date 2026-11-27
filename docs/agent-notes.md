@@ -1031,8 +1031,9 @@ one setting for all.
   `listOwnDocumentAi`: running or finished within 24 h, 5 at most, only documents one still opens
   and not deleted) – no agent or chat per ask. While any works an `ai-scan-wash` line runs along
   the row's foot (folded bar too). No stream reaches it: `useOwnAiAsks` polls 2 s while one runs,
-  else 30 s; the page's bar invalidates it on send. An ask on a `.md` opens the page in
-  Bearbeiten with `PAGE_AGENT_STATE` (`PagePage`), its state in the bar; an `.odt` at its comment.
+  else 30 s; `createDocumentAiProposal` tells it when one is made (any caller). An ask on a `.md`
+  opens the page in Bearbeiten with `PAGE_AGENT_STATE` (`PagePage`), its state in the bar – on the
+  page already open too, by the arrival's `location.key` (`askedAt`); an `.odt` at its comment.
 - „Agenten“ (`/w/:id/dateien/agenten[/:agentId]`, side bar row under „Zuletzt“): an order to the AI
   that runs in the server (`runInBackground`), not in a request – the page only polls (1.5 s
   while `running`, `lib/api/cloud-agents.ts`). Server: `services/cloud-agents.ts` +
