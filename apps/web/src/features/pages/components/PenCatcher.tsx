@@ -184,8 +184,11 @@ export function PenCatcher({ onEdit }: { onEdit?: () => void }) {
     function watch(root: HTMLElement) {
       /** A stylus touch kept from scrolling and from Scribble – its click is the tap's, done here. */
       let held = false;
+      // A pen is down here: its touch is the stylus's even without `touchType` (Safari only) –
+      // Chrome on Android would scroll and cancel the stroke. `pointerdown` comes before `touchstart`.
+      let penDown = false;
       const onTouch = (event: TouchEvent) => {
-        if (!isStylus(event) || (event.target as Element).closest(OWN)) return;
+        if (!(penDown || isStylus(event)) || (event.target as Element).closest(OWN)) return;
         if (!editor.isEditable() && !canEdit) return;
         held = true;
         event.preventDefault();
@@ -197,6 +200,7 @@ export function PenCatcher({ onEdit }: { onEdit?: () => void }) {
         if (target.closest(OWN)) return;
         if (!editor.isEditable() && !canEdit) return;
         event.preventDefault();
+        penDown = true;
         const id = event.pointerId;
         const down = { x: event.clientX, y: event.clientY };
         const seen: Client[] = [[event.clientX, event.clientY, event.pressure]];
@@ -295,6 +299,7 @@ export function PenCatcher({ onEdit }: { onEdit?: () => void }) {
           window.removeEventListener('pointerup', onUp);
           window.removeEventListener('pointercancel', onCancel);
           held = false;
+          penDown = false;
         }
 
         /** A tap: the caret where it touched (Bearbeiten), a link followed. */
