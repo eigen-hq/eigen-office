@@ -20,7 +20,7 @@ export const MAX_INK_BANDS = 8;
 const MAX_INK_TEXT = 4000;
 const NOTHING = '-';
 
-const SYSTEM = `You read handwriting. The picture is a drawing from a note page (a tall one comes as several pictures, top to bottom, one band each – read them as one page): handwritten words, maybe sketches, arrows, boxes, underlines.
+const SYSTEM = `You read handwriting. The picture is a drawing from a note page (a tall one comes as several pictures, top to bottom, one band each, maybe overlapping a little – read them as one page, a line cut in two once): handwritten words, maybe sketches, arrows, boxes, underlines.
 
 Write out the handwritten words exactly as written, in their own language and spelling – no translation, no correction, no comment. Keep the lines as they are (one line of writing, one line of text). A list stays a list ("- " before each item where the writing has a bullet or dash). Shapes and sketches without words are left out; words inside or beside them are written out.
 
@@ -59,7 +59,7 @@ export async function readInk(
       messages: [
         { role: 'user', content: [...pictures, { type: 'text', text: 'What does it say?' }] },
       ],
-      taskBudgetTokens: 20_000,
+      taskBudgetTokens: 20_000 + 4_000 * (bands.length - 1),
       effort: 'low',
       feature: 'handwriting',
       signal: controller.signal,
