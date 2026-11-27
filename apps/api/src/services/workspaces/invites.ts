@@ -199,10 +199,10 @@ async function insertInvite(
               }
             : {
                 ...shared,
-                subject: `${actor.name} lädt dich zu „${workspace?.name ?? 'Office'}“ ein`,
+                subject: `${actor.name} lädt dich zu „${workspace?.name ?? 'Eigen Office'}“ ein`,
                 heading: 'Du bist eingeladen',
                 // The whole office, not one app: the workspace holds files, presentations, documents, chats.
-                intro: `${actor.name} hat dich zu „${workspace?.name ?? ''}“ auf Office eingeladen. Dort arbeitet ihr gemeinsam an Dateien, Präsentationen, Dokumenten und Nachrichten.`,
+                intro: `${actor.name} hat dich zu „${workspace?.name ?? ''}“ auf Eigen Office eingeladen. Dort arbeitet ihr gemeinsam an Dateien, Präsentationen, Dokumenten und Nachrichten.`,
                 button: 'Einladung annehmen',
               },
         ),

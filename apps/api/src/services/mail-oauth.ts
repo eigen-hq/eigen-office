@@ -175,11 +175,11 @@ function refusedText(
   const label = MAIL_OAUTH_LABELS[provider];
   const text = `${error} ${description}`;
   if (calendarOnly && error === 'access_denied')
-    return `Bei ${label} wurde der Zugriff auf den Kalender nicht erlaubt – ohne ihn kann Office deine Termine nicht zeigen. Versuch es noch einmal und stimm dort zu.`;
+    return `Bei ${label} wurde der Zugriff auf den Kalender nicht erlaubt – ohne ihn kann Eigen Office deine Termine nicht zeigen. Versuch es noch einmal und stimm dort zu.`;
   if (/AADSTS(65001|90094|90095)\b|admin_policy_enforced|admin (approval|consent)/i.test(text))
-    return `Bei ${label} muss erst die IT deiner Firma Office den Zugriff aufs Postfach erlauben. Bis dahin geht es mit Adresse und Passwort, wo die Firma das zulässt.`;
+    return `Bei ${label} muss erst die IT deiner Firma Eigen Office den Zugriff aufs Postfach erlauben. Bis dahin geht es mit Adresse und Passwort, wo die Firma das zulässt.`;
   if (error === 'access_denied')
-    return `Bei ${label} wurde der Zugriff aufs Postfach nicht erlaubt – ohne ihn kann Office keine Mails lesen und senden. Versuch es noch einmal und stimm dort zu.`;
+    return `Bei ${label} wurde der Zugriff aufs Postfach nicht erlaubt – ohne ihn kann Eigen Office keine Mails lesen und senden. Versuch es noch einmal und stimm dort zu.`;
   return `Die Anmeldung bei ${label} hat nicht geklappt. Versuch es noch einmal.`;
 }
 
@@ -338,7 +338,7 @@ export async function finishMailOAuth(deps: AppDeps, c: Context<OptionalViewerEn
     if (signedIn.granted && !calendarsGranted(flow, signedIn.granted)) {
       return fail(
         flow,
-        `Bei ${label} wurde der Zugriff auf den Kalender nicht erlaubt – ohne ihn kann Office deine Termine nicht zeigen. Versuch es noch einmal und ${flow.provider === 'google' ? 'setz dort das Häkchen beim Kalender' : 'stimm dort zu'}.`,
+        `Bei ${label} wurde der Zugriff auf den Kalender nicht erlaubt – ohne ihn kann Eigen Office deine Termine nicht zeigen. Versuch es noch einmal und ${flow.provider === 'google' ? 'setz dort das Häkchen beim Kalender' : 'stimm dort zu'}.`,
         { step: 'oauth-consent' },
       );
     }

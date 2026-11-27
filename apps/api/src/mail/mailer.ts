@@ -155,7 +155,7 @@ const APP_MARKS: Record<MailApp, { name: string; png: string; height: number }> 
 };
 
 /** The name over mails of the whole software (sign-in, account, data, plan): no app's. */
-const OFFICE = 'Office';
+const OFFICE = 'Eigen Office';
 
 const logoOf = (app: MailApp): InlineImage => ({
   cid: `${app}-logo`,
@@ -205,14 +205,14 @@ const mark = (app: MailApp, width: number) => {
 /**
  * A short German mail with the apps' look inside one card: the app canvas with its dot grid, the
  * word mark of the app it belongs to (`AppLogo` – mark and name; a mail of the whole software
- * names only „Office“, in the same type, and brings no picture), heading, the white primary button and the plain link as fallback (a mail
+ * names only „Eigen Office“, in the same type, and brings no picture), heading, the white primary button and the plain link as fallback (a mail
  * that brings its file along has none); around it the client's own background. `color-scheme: light dark` tells clients the card needs no
  * inverting. The mark travels inline (`cid:`). Gmail drops CSS gradients, so it shows the card
  * without dots.
  */
 export function inviteMail(input: {
   to: string;
-  /** The app the mail is about (a presentation: Slider); without one it speaks for Office. */
+  /** The app the mail is about (a presentation: Slider); without one it speaks for Eigen Office. */
   app?: MailApp;
   subject: string;
   heading: string;

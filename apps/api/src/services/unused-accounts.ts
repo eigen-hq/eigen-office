@@ -97,7 +97,7 @@ function reminderMail(deps: AppDeps, user: UserRow, stage: number, deletesAt: Da
     url: dataRequestUrl(deps, token),
     subject: `Dein Konto wird ${when} gelöscht`,
     heading: 'Konto behalten?',
-    intro: `Du hast Office seit über einem Jahr nicht genutzt. Ungenutzte Konten werden gelöscht, damit keine Daten unnötig liegen bleiben. Deins wird am ${formatDate(deletesAt)} gelöscht, mit deinen Präsentationen. Kommentare in fremden Präsentationen bleiben ohne deinen Namen.`,
+    intro: `Du hast Eigen Office seit über einem Jahr nicht genutzt. Ungenutzte Konten werden gelöscht, damit keine Daten unnötig liegen bleiben. Deins wird am ${formatDate(deletesAt)} gelöscht, mit deinen Präsentationen. Kommentare in fremden Präsentationen bleiben ohne deinen Namen.`,
     button: 'Konto behalten',
     outro:
       'Ein Klick genügt, oder melde dich einfach an. Eine Kopie deiner Daten bekommst du nach dem Anmelden unter „Konto & Anmeldung“.',

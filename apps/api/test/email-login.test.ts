@@ -134,7 +134,7 @@ describe('login by mail (BER-168)', () => {
     });
     expect(bertStart.status).toBe(204);
     const bertMail = mailer.sent.at(-1);
-    expect(bertMail?.subject).toBe('Bei Office anmelden');
+    expect(bertMail?.subject).toBe('Bei Eigen Office anmelden');
     const bertCode = /ein: (\d{6})/.exec(bertMail?.text ?? '')?.[1] ?? '';
     expect(bertMail?.html).toContain(bertCode);
     const bert = await typed(bertCode, cookiePair(bertStart, 'slider_email_login'));

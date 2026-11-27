@@ -876,12 +876,12 @@ describe('invitation mails', () => {
     expect(mail?.text).toContain(created.url);
     expect(mail?.html).toContain(`href="${created.url}"`);
     expect(JSON.stringify(mail)).not.toContain('robert@example.org');
-    // A workspace is the whole office: the mail is Office's – its name, no app's mark.
-    expect(mail?.html).toContain('>Office</td>');
+    // A workspace is the whole office: the mail is Eigen Office's – its name, no app's mark.
+    expect(mail?.html).toContain('>Eigen Office</td>');
     expect(mail?.html).not.toContain('cid:');
     expect(mail?.attachments).toEqual([]);
-    expect(mail?.text).toContain('auf Office eingeladen');
-    expect(mail?.text).toContain('\n– Office\n');
+    expect(mail?.text).toContain('auf Eigen Office eingeladen');
+    expect(mail?.text).toContain('\n– Eigen Office\n');
 
     // Links are passed on by hand, never mailed.
     expect((await invite({})).emailSent).toBe(false);

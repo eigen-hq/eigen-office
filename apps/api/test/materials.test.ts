@@ -1141,7 +1141,7 @@ describe('the material page', () => {
     const tokens = (await granted.json()) as { access_token: string; refresh_token: string };
     expect(tokens.access_token).toMatch(/^slider_at_/);
     expect((await token({ ...exchange, code_verifier: verifier })).status).toBe(400);
-    // The app shows Office as the connector, with Cloud's mark (MCP `icons`, absolute, on the site).
+    // The app shows Eigen Office as the connector, with Cloud's mark (MCP `icons`, absolute, on the site).
     const hello = await rpc(tokens.access_token, 'initialize', {
       protocolVersion: '2025-11-25',
       capabilities: {},
@@ -1149,7 +1149,7 @@ describe('the material page', () => {
     });
     expect(hello.body?.result).toMatchObject({
       serverInfo: {
-        title: 'Office',
+        title: 'Eigen Office',
         icons: [
           { src: `${origin}/cloud-favicon.svg`, mimeType: 'image/svg+xml' },
           { src: `${origin}/cloud-icon-192.png`, mimeType: 'image/png', sizes: ['192x192'] },

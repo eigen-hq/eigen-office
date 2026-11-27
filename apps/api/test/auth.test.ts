@@ -775,11 +775,11 @@ describe('sessions', () => {
       };
       expect(await refusal('http://slider.firma.de')).toEqual([
         400,
-        'Der Office-Server muss über https:// erreichbar sein.',
+        'Der Eigen-Office-Server muss über https:// erreichbar sein.',
       ]);
       expect(await refusal('http://127.0.0.1:5')).toEqual([
         400,
-        'Unter 127.0.0.1:5 läuft kein Office.',
+        'Unter 127.0.0.1:5 läuft kein Eigen Office.',
       ]);
       expect(await refusal('https://weg.test')).toEqual([502, 'weg.test ist nicht erreichbar.']);
       const selfHosted = (await (await startAt('http://localhost:7/egal?x=1')).json()) as {

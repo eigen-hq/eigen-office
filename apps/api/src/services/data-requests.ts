@@ -107,19 +107,19 @@ export async function resolveDataRequest(
 
 const MAILS: Record<'export' | 'delete', Omit<Parameters<typeof inviteMail>[0], 'to' | 'url'>> = {
   export: {
-    subject: 'Deine Daten aus Office',
+    subject: 'Deine Daten aus Eigen Office',
     heading: 'Deine Daten herunterladen',
     intro:
-      'Für diese Adresse wurde eine Kopie der Daten angefragt, die Office speichert. Über den Button lädst du sie als ZIP herunter.',
+      'Für diese Adresse wurde eine Kopie der Daten angefragt, die Eigen Office speichert. Über den Button lädst du sie als ZIP herunter.',
     button: 'Daten herunterladen',
     outro:
       'Der Link gilt 48 Stunden und lädt die Daten höchstens dreimal herunter. Du hast nichts angefragt? Dann ignoriere diese Mail. Ohne den Link kommt niemand an die Daten.',
   },
   delete: {
-    subject: 'Daten in Office löschen',
+    subject: 'Daten in Eigen Office löschen',
     heading: 'Löschung bestätigen',
     intro:
-      'Für diese Adresse wurde die Löschung der Daten angefragt, die Office speichert. Gelöscht wird erst, wenn du es über den Button bestätigst.',
+      'Für diese Adresse wurde die Löschung der Daten angefragt, die Eigen Office speichert. Gelöscht wird erst, wenn du es über den Button bestätigst.',
     button: 'Löschung ansehen und bestätigen',
     outro:
       'Der Link gilt 24 Stunden. Du hast nichts angefragt? Dann ignoriere diese Mail, es bleibt alles, wie es ist.',
@@ -132,7 +132,7 @@ export function assertMailConfigured(deps: AppDeps): void {
     throw new ApiError(
       503,
       'internal',
-      'Diese Office-Instanz kann keine E-Mails senden. Melde dich an und nutze „Konto & Anmeldung“, oder wende dich an den Betreiber.',
+      'Diese Eigen-Office-Instanz kann keine E-Mails senden. Melde dich an und nutze „Konto & Anmeldung“, oder wende dich an den Betreiber.',
     );
   }
 }
@@ -215,7 +215,7 @@ export async function exportInvites(
   const zip = new JSZip();
   zip.file(
     'LIESMICH.txt',
-    `Deine Daten aus Office\n\nZu ${address} gibt es kein Konto. Gespeichert sind nur Einladungen an diese Adresse (einladungen.json).\n`,
+    `Deine Daten aus Eigen Office\n\nZu ${address} gibt es kein Konto. Gespeichert sind nur Einladungen an diese Adresse (einladungen.json).\n`,
   );
   zip.file('einladungen.json', `${JSON.stringify(inviteEntries(rows), null, 2)}\n`);
   const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });

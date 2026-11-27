@@ -118,7 +118,7 @@ export interface McpTool {
   };
 }
 
-export const MCP_INSTRUCTIONS = `Office is a team's suite of apps in workspaces: presentations (Slider, where a team reviews and builds them), files (Cloud), text documents (Writer), messages and mail (Sender), to-dos and agents. Presentations live in workspaces. Every presentation has its material – what people collected for it, never part of the deck: files (PDFs, documents, spreadsheets, pictures), links and notes (rich text). Everyone on the presentation sees it under „Material“ in its menu.
+export const MCP_INSTRUCTIONS = `Eigen Office is a team's suite of apps in workspaces: presentations (Slider, where a team reviews and builds them), files (Cloud), text documents (Writer), messages and mail (Sender), to-dos and agents. Presentations live in workspaces. Every presentation has its material – what people collected for it, never part of the deck: files (PDFs, documents, spreadsheets, pictures), links and notes (rich text). Everyone on the presentation sees it under „Material“ in its menu.
 
 How to work with it:
 - Find: search looks through everything at once (presentations, their comments, the files and notes of their material) and fetch reads a hit; list_presentations lists presentations (by title or text on slides and in comments), then get_presentation for its slides' text and its material. view_slide shows a slide as it looks; list_comments reads the feedback.
@@ -137,7 +137,7 @@ How to work with it:
 - Messages (Sender): list_conversations shows the person's conversations (areas' channels, groups, direct ones), read_conversation reads one (files named, a voice message or video with what was said in it), post_message writes there under the person's name – Markdown, Cloud files along, an answer to a message (reply_to) – only a message they asked for.
 - Mail („Post“ in Sender and Cloud): list_mailboxes, search_mail and read_mail_thread read the person's own mail; draft_mail_reply leaves a reply and draft_mail a new mail as their draft (find_mail_address finds whom it goes to – never guess one), file_mail_attachment puts an attachment into the files, mark_mail marks read, unread or spam. These act at once, only on the person's own word: send_mail sends a draft they could see (it waits a minute in the outbox), delete_mail deletes a conversation for good, unsubscribe_mail leaves a newsletter's list; list_mail_rules, add_mail_rule and delete_mail_rule block or trust senders; prepare_mailbox, update_mailbox and check_mailbox set up and look after a mailbox – passwords the person types in themselves.
 - Agents: list_agents shows Cloud's agents the person sees, read_agent what one said last; message_agent gives one an order – or, without agent, starts a new one – which then works on the server with the person's rights.
-- Settings: read_settings shows the person's own (name, colour, the voice in calls, how often mail is checked) and what only their browser keeps. Changing them is the person's own, in Office under „Einstellungen“.
+- Settings: read_settings shows the person's own (name, colour, the voice in calls, how often mail is checked) and what only their browser keeps. Changing them is the person's own, in Eigen Office under „Einstellungen“.
 Presentations, slides and the files, notes and links of their material are named by their ids; links to open them come with the answers – give them to the person.`;
 
 const presentationProperty = {
@@ -179,9 +179,9 @@ const read = { readOnlyHint: true, openWorldHint: false } as const;
 export const MCP_TOOLS: McpTool[] = [
   {
     name: 'search',
-    title: 'Search Office',
+    title: 'Search Eigen Office',
     description:
-      'Searches everything the person can open in Office at once: presentations (titles, slide text, comments) and their material (the text of files – PDFs, documents, spreadsheets –, notes). Returns JSON `{"results": [{"id", "title", "url", "snippet"}]}`, best first; `fetch` reads a result in full.',
+      'Searches everything the person can open in Eigen Office at once: presentations (titles, slide text, comments) and their material (the text of files – PDFs, documents, spreadsheets –, notes). Returns JSON `{"results": [{"id", "title", "url", "snippet"}]}`, best first; `fetch` reads a result in full.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -507,7 +507,7 @@ export const MCP_TOOLS: McpTool[] = [
     name: 'download_presentation',
     title: 'Download a presentation',
     description:
-      'Hands over a presentation as a file, as it is now: `format` pdf (default; with `slide` only that slide), odp (the presentation file itself – PowerPoint, Keynote and LibreOffice open it) or png (one `slide` as a picture). The file comes attached (up to 10 MB), with a link the person opens in a browser where they are signed in to Office. Needs the right to edit.',
+      'Hands over a presentation as a file, as it is now: `format` pdf (default; with `slide` only that slide), odp (the presentation file itself – PowerPoint, Keynote and LibreOffice open it) or png (one `slide` as a picture). The file comes attached (up to 10 MB), with a link the person opens in a browser where they are signed in to Eigen Office. Needs the right to edit.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -571,7 +571,8 @@ async function workspacesOf(deps: AppDeps, caller: McpCaller) {
 export async function findWorkspace(deps: AppDeps, caller: McpCaller, wanted: string | undefined) {
   const mine = await workspacesOf(deps, caller);
   if (!wanted) {
-    if (!mine[0]) throw new ToolError('The person has no workspace Office lets this app into.');
+    if (!mine[0])
+      throw new ToolError('The person has no workspace Eigen Office lets this app into.');
     return mine[0];
   }
   const key = wanted.trim();
@@ -2043,7 +2044,7 @@ async function downloadPresentation(
   const content: McpContent[] = [
     {
       type: 'text',
-      text: `${file.fileName} (${size})${attached ? ' is attached' : ' is too big to attach'}. The person downloads it in a browser where they are signed in to Office: ${link}`,
+      text: `${file.fileName} (${size})${attached ? ' is attached' : ' is too big to attach'}. The person downloads it in a browser where they are signed in to Eigen Office: ${link}`,
     },
   ];
   if (attached)

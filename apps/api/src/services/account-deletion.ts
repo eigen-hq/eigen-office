@@ -385,7 +385,7 @@ async function tellNewAdmins(
         : `${name} hat das Konto gelöscht und dich als neuen Admin des Workspace bestimmt. Die hochgeladenen Präsentationen von ${name} dort gehören jetzt dir, die verknüpften wurden gelöscht.`,
       button: 'Workspace öffnen',
       outro:
-        'Kam das unerwartet? Frag bei der Person nach oder wende dich an den Betreiber dieser Office-Instanz.',
+        'Kam das unerwartet? Frag bei der Person nach oder wende dich an den Betreiber dieser Eigen-Office-Instanz.',
     });
     await deps.mailer.send(message).catch((error: unknown) => {
       deps.log.warn(`Mail to the new admin ${userId} failed: ${String(error)}`);

@@ -3307,7 +3307,7 @@ describe('Sender – the workspace’s messages', () => {
     );
     const large = await ingestMail(ctx.deps, kept!, { folder: 'inbox', uid: 7777, raw: big });
     expect((await ok<MailThread>(send('GET', `/mail/threads/${large}`))).messages[0]).toMatchObject(
-      { subject: 'Pläne', text: expect.stringContaining('zu groß für Office (50 MB)') },
+      { subject: 'Pläne', text: expect.stringContaining('zu groß für Eigen Office (50 MB)') },
     );
     // From the provider's spam folder: spam, said by the provider (`server`) – no mark to check.
     const junk = await ingestMail(ctx.deps, kept!, {

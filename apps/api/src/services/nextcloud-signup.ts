@@ -174,9 +174,9 @@ export async function sendNextcloudSignupMail(
       deps,
       inviteMail({
         to: email,
-        subject: 'Deine Anmeldung bei Office bestätigen',
+        subject: 'Deine Anmeldung bei Eigen Office bestätigen',
         heading: 'Anmeldung bestätigen',
-        intro: `Jemand meldet sich mit deiner Nextcloud (${new URL(input.server).host}) in einem Browser bei Office an, in dem du dich so noch nie angemeldet hast. Warst du das, bestätige es hier.`,
+        intro: `Jemand meldet sich mit deiner Nextcloud (${new URL(input.server).host}) in einem Browser bei Eigen Office an, in dem du dich so noch nie angemeldet hast. Warst du das, bestätige es hier.`,
         button: 'Anmeldung bestätigen',
         url,
         outro:
@@ -191,7 +191,7 @@ export async function sendNextcloudSignupMail(
       to: email,
       subject: 'Dein Konto bestätigen',
       heading: 'Konto erstellen',
-      intro: `Du hast dich mit deiner Nextcloud (${new URL(input.server).host}) bei Office angemeldet. Bestätige noch, dass diese Adresse dir gehört, dann ist dein Konto da.`,
+      intro: `Du hast dich mit deiner Nextcloud (${new URL(input.server).host}) bei Eigen Office angemeldet. Bestätige noch, dass diese Adresse dir gehört, dann ist dein Konto da.`,
       button: 'Adresse bestätigen',
       url,
       outro:

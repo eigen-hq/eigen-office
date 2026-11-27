@@ -245,7 +245,7 @@ function icsOf(name: string, rows: CalendarEventRow[]): string {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Office//Kalender//DE',
+    'PRODID:-//Eigen Office//Kalender//DE',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${escape(name)}`,

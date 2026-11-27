@@ -97,12 +97,12 @@ export async function sendEmailLogin(
       deps,
       inviteMail({
         ...base,
-        subject: 'Deine Anmeldung bei Office',
+        subject: 'Deine Anmeldung bei Eigen Office',
         outro: 'Du warst das nicht? Dann ignoriere diese Mail, es ändert sich nichts.',
         heading: 'Noch kein Konto',
         intro:
-          'Für diese Adresse gibt es auf dieser Office-Instanz kein Konto, und neue Konten entstehen hier nur mit einer Einladung. Bitte jemanden aus deinem Team, dich in euren Workspace einzuladen.',
-        button: 'Zu Office',
+          'Für diese Adresse gibt es auf dieser Eigen-Office-Instanz kein Konto, und neue Konten entstehen hier nur mit einer Einladung. Bitte jemanden aus deinem Team, dich in euren Workspace einzuladen.',
+        button: 'Zu Eigen Office',
         url: url(loginPath()),
       }),
     );
@@ -125,10 +125,10 @@ export async function sendEmailLogin(
     deps,
     inviteMail({
       ...base,
-      subject: known ? 'Bei Office anmelden' : 'Dein Konto erstellen',
-      heading: known ? 'Bei Office anmelden' : 'Konto erstellen',
+      subject: known ? 'Bei Eigen Office anmelden' : 'Dein Konto erstellen',
+      heading: known ? 'Bei Eigen Office anmelden' : 'Konto erstellen',
       intro: known
-        ? 'Mit diesem Link meldest du dich bei Office an.'
+        ? 'Mit diesem Link meldest du dich bei Eigen Office an.'
         : 'Mit diesem Link erstellst du dein Konto, ganz ohne Passwort. Danach kannst du einen Passkey anlegen und dich künftig damit anmelden.',
       button: known ? 'Anmelden' : 'Konto erstellen',
       url: url(`/anmelden/${token}`),
