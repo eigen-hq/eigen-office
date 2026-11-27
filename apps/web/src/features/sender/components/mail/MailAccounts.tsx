@@ -235,7 +235,7 @@ function GoogleMailPending() {
     <Tooltip
       side="bottom"
       maxWidth={64}
-      label="Kommt bald: Für Gmail mit Google-Anmeldung muss Google Office erst prüfen – daran arbeiten wir. Bis dahin verbindest du Gmail unten mit Adresse und App-Passwort. Deinen Google Kalender verbindest du schon jetzt im Kalender."
+      label="Kommt bald: Für Gmail mit Google-Anmeldung muss Google Eigen Office erst prüfen – daran arbeiten wir. Bis dahin verbindest du Gmail unten mit Adresse und App-Passwort. Deinen Google Kalender verbindest du schon jetzt im Kalender."
     >
       <Button size="lg" variant="secondary" disabled className="gap-2.5 max-sm:flex-1">
         <GoogleMark size={16} />

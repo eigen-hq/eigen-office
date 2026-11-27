@@ -16,13 +16,13 @@ export function NextcloudSafetyDialog({
   /** Linking from /konto: Nextcloud names the account asking instead of showing a code. */
   linking?: boolean;
 }) {
-  const client = `Office (${window.location.host})`;
+  const client = `Eigen Office (${window.location.host})`;
   return (
     <Dialog
       open={open}
       onClose={onClose}
       title="Sicher mit Nextcloud anmelden"
-      description="Gleich öffnet sich deine Nextcloud und fragt, ob Office zugreifen darf. Darauf kommt es an:"
+      description="Gleich öffnet sich deine Nextcloud und fragt, ob Eigen Office zugreifen darf. Darauf kommt es an:"
       footer={
         <Button className="w-full" onClick={onClose}>
           Verstanden
@@ -31,11 +31,11 @@ export function NextcloudSafetyDialog({
     >
       <div className="flex flex-col gap-4">
         <Part icon="checkCircleOutline" tone="text-success" title="So ist es richtig">
-          <li>Du hast die Anmeldung hier in Office selbst gestartet.</li>
+          <li>Du hast die Anmeldung hier in Eigen Office selbst gestartet.</li>
           <li>
             {linking
-              ? `Nextcloud zeigt „${client} für …“ mit deiner eigenen Office-Adresse.`
-              : `Nextcloud zeigt „${client} | Code …“ mit genau dem Code, den dir Office anzeigt.`}
+              ? `Nextcloud zeigt „${client} für …“ mit deiner Eigen-Office-Adresse.`
+              : `Nextcloud zeigt „${client} | Code …“ mit genau dem Code, den dir Eigen Office anzeigt.`}
           </li>
           <li>Du bestätigst innerhalb von 5 Minuten.</li>
         </Part>
@@ -50,9 +50,9 @@ export function NextcloudSafetyDialog({
               : 'der Code fehlt oder nicht übereinstimmt.'}
           </li>
         </Part>
-        <Part icon="lock" tone="text-fg-muted" title="Was Office damit darf">
+        <Part icon="lock" tone="text-fg-muted" title="Was Eigen Office damit darf">
           <li>Dich anmelden und Präsentationen aus deiner Nextcloud einfügen.</li>
-          <li>Office ändert in deiner Nextcloud nichts.</li>
+          <li>Eigen Office ändert in deiner Nextcloud nichts.</li>
           <li>
             Widerrufen kannst du den Zugriff jederzeit in Nextcloud unter Einstellungen →
             Sicherheit.
@@ -61,8 +61,8 @@ export function NextcloudSafetyDialog({
         <Part icon="error" tone="text-warning" title="Versehentlich bestätigt?">
           <li>
             Widerrufe in Nextcloud unter Einstellungen → Sicherheit den Eintrag „{client}“, trenne
-            die Nextcloud in Office unter „Konto &amp; Anmeldung“ und sag dem Betreiber dieser
-            Office-Instanz Bescheid.
+            die Nextcloud in Eigen Office unter „Konto &amp; Anmeldung“ und sag dem Betreiber dieser
+            Eigen-Office-Instanz Bescheid.
           </li>
         </Part>
       </div>

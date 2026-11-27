@@ -30,7 +30,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'imprint' }) {
           <LegalText markdown={text} />
         ) : (
           <LegalText
-            markdown={`# ${title}\n\nDer Betreiber dieser Office-Instanz hat hier noch nichts hinterlegt.`}
+            markdown={`# ${title}\n\nDer Betreiber dieser Eigen-Office-Instanz hat hier noch nichts hinterlegt.`}
           />
         )}
       </article>

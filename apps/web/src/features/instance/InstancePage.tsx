@@ -113,7 +113,7 @@ export function Component() {
     >
       {!user.isInstanceAdmin ? (
         <Notice tone="warning" variant="tinted" title="Nur für den Instanz-Admin">
-          Diese Seite sieht nur die Person, die Office hier betreibt.
+          Diese Seite sieht nur die Person, die Eigen Office hier betreibt.
         </Notice>
       ) : (
         <>

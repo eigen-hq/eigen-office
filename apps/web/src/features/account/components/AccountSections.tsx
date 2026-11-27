@@ -189,7 +189,7 @@ export function CloudLoginSection() {
                   className="flex animate-pop-in flex-col gap-3 rounded-panel p-3 glass-control"
                 >
                   <TextField
-                    label="Adresse des Office-Servers"
+                    label="Adresse des Eigen-Office-Servers"
                     placeholder="office.firma.de"
                     inputMode="url"
                     autoComplete="url"
@@ -392,7 +392,7 @@ export function PasskeysSection({ onNotify }: { onNotify: ShowToast }) {
     <Subsection
       title="Passkeys"
       icon={<PasskeyMark size={16} />}
-      description="Anmelden mit Fingerabdruck, Gesicht oder Geräte-PIN – ohne Passwort und ohne Mail. Ein Passkey gilt nur für dieses Konto und diese Office-Adresse."
+      description="Anmelden mit Fingerabdruck, Gesicht oder Geräte-PIN – ohne Passwort und ohne Mail. Ein Passkey gilt nur für dieses Konto und diese Eigen-Office-Adresse."
       aside={
         supported ? (
           <Button

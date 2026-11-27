@@ -223,7 +223,7 @@ function DisconnectNextcloudDialog({
     <ConfirmDialog
       onClose={onClose}
       title={`Nextcloud (${host}) entfernen?`}
-      description={`Office löscht seinen Zugang in deiner Nextcloud und liest keine Dateien mehr darüber. ${consequence}`}
+      description={`Eigen Office löscht seinen Zugang in deiner Nextcloud und liest keine Dateien mehr darüber. ${consequence}`}
       confirmLabel="Entfernen"
       pending={disconnect.isPending}
       // In the dialog: a toast would sit behind its backdrop.
@@ -234,7 +234,7 @@ function DisconnectNextcloudDialog({
             onNotify(
               revoked
                 ? `Nextcloud (${host}) entfernt`
-                : `Entfernt – Nextcloud war nicht erreichbar. Entferne „Office“ (früher „Slider“) dort unter Einstellungen → Sicherheit.`,
+                : `Entfernt – Nextcloud war nicht erreichbar. Entferne „Eigen Office“ (früher „Office“ oder „Slider“) dort unter Einstellungen → Sicherheit.`,
             );
             onClose();
           },

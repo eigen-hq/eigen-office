@@ -6,10 +6,10 @@ import { Button, ErrorText, Icon, Select } from '@/ui';
 
 const ALL = '__all__';
 /**
- * The connection is to all the apps (the MCP server „Office“): the page says Office, its head
- * the app one is in (Office has no mark of its own).
+ * The connection is to all the apps (the MCP server „Eigen Office“): the page says Eigen Office, its head
+ * the app one is in (Eigen Office has no mark of its own).
  */
-const DOC_TITLE = 'KI-App verbinden | Office';
+const DOC_TITLE = 'KI-App verbinden | Eigen Office';
 
 /**
  * `/verbinden?anfrage=…` – an AI app (Claude, ChatGPT …) asks to be let into the account over
@@ -85,7 +85,7 @@ export function Component() {
     <CenteredLayout docTitle={DOC_TITLE}>
       <CenteredCard
         icon={<Icon name="autoAwesome" size={28} />}
-        title={`${clientName} mit Office verbinden?`}
+        title={`${clientName} mit Eigen Office verbinden?`}
         message={
           <>
             {clientName} handelt dann {me?.user ? `als ${me.user.name}` : 'in deinem Namen'}, mit

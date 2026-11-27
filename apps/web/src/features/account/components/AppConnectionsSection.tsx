@@ -161,7 +161,7 @@ export function McpSteps({ mcpUrl, oauth }: { mcpUrl: string; oauth: boolean }) 
           <li>
             <strong className="font-medium text-fg">Claude und ChatGPT:</strong> in den
             Einstellungen unter „Konnektoren“ einen eigenen Konnektor mit dieser Adresse hinzufügen.
-            Office fragt dann, ob die App darf.
+            Eigen Office fragt dann, ob die App darf.
           </li>
           <li>
             <strong className="font-medium text-fg">Claude Code:</strong>{' '}

@@ -20,9 +20,9 @@ export function BlockedWorkspace({ workspace, userId }: { workspace: Workspace; 
       back={back}
     >
       <Notice tone="warning" variant="tinted" icon="lock" title="Dieser Workspace ist gesperrt">
-        Die Person, die Office hier betreibt, hat ihn gesperrt. Was darin liegt, lässt sich gerade
-        nicht öffnen, gelöscht wurde nichts. Wende dich an sie, wenn du glaubst, dass das ein Irrtum
-        ist.
+        Die Person, die Eigen Office hier betreibt, hat ihn gesperrt. Was darin liegt, lässt sich
+        gerade nicht öffnen, gelöscht wurde nichts. Wende dich an sie, wenn du glaubst, dass das ein
+        Irrtum ist.
       </Notice>
       <LeaveSection workspace={workspace} userId={userId} />
     </SettingsLayout>

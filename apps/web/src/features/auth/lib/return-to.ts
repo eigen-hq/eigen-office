@@ -31,7 +31,7 @@ const LOGIN_ERROR_COPY: Record<LoginError, { title: string; message: string }> =
   admin_consent: {
     title: 'Freigabe durch Admin nötig',
     message:
-      'Deine Organisation erlaubt die Anmeldung bei Office noch nicht. Ein Microsoft-365-Admin muss die App einmal freigeben.',
+      'Deine Organisation erlaubt die Anmeldung bei Eigen Office noch nicht. Ein Microsoft-365-Admin muss die App einmal freigeben.',
   },
   denied: {
     title: 'Anmeldung abgebrochen',
@@ -50,7 +50,7 @@ const LOGIN_ERROR_COPY: Record<LoginError, { title: string; message: string }> =
   mail_unavailable: {
     title: 'Neues Konto gerade nicht möglich',
     message:
-      'Für ein neues Konto über Nextcloud bestätigst du deine Adresse per Mail, und diese Office-Instanz kann keine Mails senden. Melde dich anders an oder frag, wer Office betreibt.',
+      'Für ein neues Konto über Nextcloud bestätigst du deine Adresse per Mail, und diese Eigen-Office-Instanz kann keine Mails senden. Melde dich anders an oder frag, wer Eigen Office betreibt.',
   },
   rate_limited: {
     title: 'Zu viele Anmeldeversuche',
@@ -59,7 +59,7 @@ const LOGIN_ERROR_COPY: Record<LoginError, { title: string; message: string }> =
   account_blocked: {
     title: 'Konto gesperrt',
     message:
-      'Dieses Konto wurde von der Person gesperrt, die Office hier betreibt. Wende dich an sie, wenn du glaubst, dass das ein Irrtum ist.',
+      'Dieses Konto wurde von der Person gesperrt, die Eigen Office hier betreibt. Wende dich an sie, wenn du glaubst, dass das ein Irrtum ist.',
   },
   sso_required: {
     title: 'Nur Firmen-Login',

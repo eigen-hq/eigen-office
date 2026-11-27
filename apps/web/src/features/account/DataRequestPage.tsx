@@ -73,7 +73,7 @@ export function Component() {
           title="Deine Daten herunterladen"
           message={`${
             request.data.hasAccount
-              ? 'Alles, was Office über dich speichert, als ZIP.'
+              ? 'Alles, was Eigen Office über dich speichert, als ZIP.'
               : 'Zu dieser Adresse gibt es kein Konto – gespeichert sind nur Einladungen. Du bekommst sie als ZIP.'
           } Der Link gilt bis ${formatDateTime(request.data.expiresAt)} und lädt die Daten höchstens dreimal herunter.`}
         >

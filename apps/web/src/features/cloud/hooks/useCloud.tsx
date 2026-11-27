@@ -449,8 +449,8 @@ export function CloudProvider({
         return 'Diese Präsentation kannst du in Slider nicht öffnen';
       const extension = cloudExtension(node.name);
       return extension
-        ? `Office kann .${extension}-Dateien nicht öffnen`
-        : 'Office kann diese Datei nicht öffnen';
+        ? `Eigen Office kann .${extension}-Dateien nicht öffnen`
+        : 'Eigen Office kann diese Datei nicht öffnen';
     },
     [workspace.role],
   );
