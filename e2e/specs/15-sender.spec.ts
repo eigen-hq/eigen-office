@@ -109,7 +109,11 @@ test('Sender: a message is formatted, answered with its quote, found from the si
   const agent = (await made.json()) as { id: string };
   await page.request.post(`/api/cloud/agents/${agent.id}/messages`, { data: { text: 'Hallo' } });
   await page.goto(`/w/${workspace!.id}/dateien`);
-  const row = page.getByRole('navigation', { name: 'Cloud' }).locator(`a[href$="${agent.id}"]`);
+  // Its chat row – the last: while it works it also stands under „Agenten“.
+  const row = page
+    .getByRole('navigation', { name: 'Cloud' })
+    .locator(`a[href$="${agent.id}"]`)
+    .last();
   await row.dispatchEvent('drop', { dataTransfer: await filesOf('Rechnung.txt') });
   await expect(
     page.getByRole('form', { name: 'Nachricht an den Agenten' }).getByText('Rechnung.txt'),

@@ -1,4 +1,5 @@
-import { useParams, useSearchParams } from 'react-router';
+import { useLocation, useParams, useSearchParams } from 'react-router';
+import { PAGE_AGENT_STATE } from '@/features/pages';
 import { useCloudNode } from '@/lib/api';
 import { routes } from '@/lib/routes';
 import type { Crumb } from './components/CloudPage';
@@ -15,6 +16,10 @@ import { NEW_PAGE_PARAM, NOTES_FOLDER } from './lib/pages';
 export function Component() {
   const { pageId = '' } = useParams();
   const [params] = useSearchParams();
+  // Come from an ask in the side bar's „Agenten“: in Bearbeiten, where its bar shows how it goes.
+  const asked = Boolean(
+    (useLocation().state as Record<string, unknown> | null)?.[PAGE_AGENT_STATE],
+  );
   const ui = useCloud();
   const { workspace } = ui;
   const areas = ui.home?.areas ?? [];
@@ -59,7 +64,7 @@ export function Component() {
               ? routes.cloudFiles(workspace.id)
               : undefined
       }
-      editing={params.has(NEW_PAGE_PARAM)}
+      editing={params.has(NEW_PAGE_PARAM) || asked}
     />
   );
 }

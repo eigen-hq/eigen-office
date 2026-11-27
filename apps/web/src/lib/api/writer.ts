@@ -6,6 +6,7 @@ import {
   type CreateWriterCommentInput,
   type CreateWriterDocumentInput,
   type UpdateWriterCommentInput,
+  type WriterAiAsk,
   type WriterAiProposal,
   type WriterComment,
   type WriterDocument,
@@ -36,6 +37,8 @@ export const writerKeys = {
   document: (documentId: string) => ['writer-document', documentId] as const,
   comments: (documentId: string) => ['writer-comments', documentId] as const,
   aiProposals: (documentId: string) => ['writer-ai', documentId] as const,
+  /** One's own asks across the workspace's documents (the side bar's „Agenten“). */
+  asks: (workspaceId: string) => ['writer-ai-asks', workspaceId] as const,
 };
 
 const listPath = (workspaceId: string) =>
@@ -254,6 +257,21 @@ export const stopDocumentAiProposal = (proposalId: string) =>
   api.post<WriterAiProposal>(`/document-ai-proposals/${proposalId}/stop`, {});
 export const moveDocumentAiProposal = (proposalId: string, action: 'revert' | 'reapply') =>
   api.post<WriterAiProposal>(`/document-ai-proposals/${proposalId}/${action}`, {});
+
+/**
+ * One's own asks of a document AI in the workspace – at work, or done within the day. No live
+ * stream reaches the side bar: asked again every 2 s while one works, else now and then.
+ */
+export const useOwnAiAsks = (workspaceId: string) =>
+  useQuery({
+    queryKey: writerKeys.asks(workspaceId),
+    queryFn: () =>
+      api.get<WriterAiAsk[]>(
+        `/workspaces/${encodeURIComponent(workspaceId)}/document-ai-proposals`,
+      ),
+    refetchInterval: (query) =>
+      query.state.data?.some((ask) => ask.status === 'running') ? 2_000 : 30_000,
+  });
 
 /** Where my caret stands in the document, for the others who have it open. */
 export const sendDocumentPresence = (documentId: string, sel: WriterPresence['sel']) =>

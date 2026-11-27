@@ -18,10 +18,12 @@ import {
   type SenderAgent,
   type MailThreadSummary,
   type SenderChannel,
+  type WriterAiAsk,
 } from '@slider/shared';
 import { handToChat } from '@/features/attachments';
+import { PAGE_AGENT_STATE } from '@/features/pages';
 import { atLeast } from '@/features/workspaces';
-import { useMailThreads, usePinCloudNode, useTodos } from '@/lib/api';
+import { useMailThreads, useOwnAiAsks, usePinCloudNode, useTodos } from '@/lib/api';
 import { routes } from '@/lib/routes';
 import { BarHandle } from '@/shell/BarHandle';
 import { BarStartLink } from '@/shell/BarStartLink';
@@ -63,6 +65,7 @@ import {
 } from '@/ui';
 import { OWN_FILES, useCloud, type CloudTarget } from '../hooks/useCloud';
 import { areaTree, canHaveAreasUnder, isWorkspaceOwn } from '../lib/areas';
+import { appFor } from '../lib/kinds';
 import { useCloudNewActions } from '../hooks/useNewActions';
 import { DROP_FAILED, droppedFiles } from '../lib/upload';
 import { areaColor } from './AreaDot';
@@ -168,6 +171,7 @@ function NavRow({
   icon,
   end,
   count,
+  className,
   onNodes,
   onFiles,
   children,
@@ -176,6 +180,7 @@ function NavRow({
   icon: IconName;
   end?: boolean;
   count?: number;
+  className?: string;
   /** With it the row is a place to drop what is dragged in the page. */
   onNodes?: (nodes: readonly CloudNode[]) => void;
   onFiles?: (data: DataTransfer) => void;
@@ -200,6 +205,7 @@ function NavRow({
           rowClass({ isActive: barRow === to || (state.isActive && !elsewhere) }),
           folded && foldedRow,
           drop.over && overClass,
+          className,
         )
       }
       {...drop.handlers}
@@ -210,6 +216,150 @@ function NavRow({
         <span className={cn('text-xs text-fg-subtle tabular-nums', folded && foldedHide)}>
           {count}
         </span>
+      ) : null}
+    </NavLink>
+  );
+}
+
+const AGENTS_CLOSED_KEY = 'slider.cloud.agentsClosed';
+
+/** What an ask of a page's AI says of itself – the row's tooltip. */
+const ASK_STATES: Record<WriterAiAsk['status'], string> = {
+  running: 'Die KI arbeitet daran',
+  applied: 'Erledigt',
+  answered: 'Beantwortet',
+  failed: 'Hat nicht geklappt',
+  stopped: 'Abgebrochen',
+  reverted: 'Zurückgenommen',
+};
+
+/**
+ * „Agenten“ and, folded out under it, what is at work: one's agents running now (to their chats,
+ * the light round their faces) and one's asks of a page's or document's AI from its bar – at work
+ * or done within the day, each opening where it was asked, its state shown in the bar there. No
+ * agent or chat of its own per ask. While anything works a light runs along the row's foot, so
+ * it shows folded in, folded up and in a folded bar alike.
+ */
+function AgentsGroup() {
+  const ui = useCloud();
+  const sender = useSenderOrNull();
+  const folded = use(Folded);
+  const asks = useOwnAiAsks(ui.workspace.id).data ?? [];
+  const agents = (sender?.home?.agents ?? []).filter((agent) => agent.running);
+  const working = agents.length > 0 || asks.some((ask) => ask.status === 'running');
+  const [closed, setClosed] = useState(() => {
+    try {
+      return localStorage.getItem(AGENTS_CLOSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () =>
+    setClosed((before) => {
+      try {
+        localStorage.setItem(AGENTS_CLOSED_KEY, before ? '0' : '1');
+      } catch {
+        // Not kept: it still folds for now.
+      }
+      return !before;
+    });
+  const toggles = (agents.length > 0 || asks.length > 0) && !folded;
+  return (
+    <div className="flex shrink-0 flex-col gap-0.5">
+      <div className="relative flex shrink-0 flex-col">
+        <NavRow
+          to={routes.cloudAgents(ui.workspace.id)}
+          icon="autoAwesome"
+          className={toggles ? 'pr-8' : undefined}
+        >
+          Agenten
+        </NavRow>
+        {working && (
+          <span
+            role="progressbar"
+            aria-label="Agenten arbeiten"
+            className={cn(
+              'pointer-events-none absolute bottom-0.5 h-0.5 overflow-hidden rounded-full bg-hover',
+              folded ? 'inset-x-2.5 lg:inset-x-1.5' : 'inset-x-2.5',
+            )}
+          >
+            <span className="ai-scan-wash ai-scan-wash-bright absolute inset-0" />
+          </span>
+        )}
+        {toggles && (
+          <button
+            type="button"
+            aria-expanded={!closed}
+            aria-label={
+              closed ? 'Was die Agenten tun, ausklappen' : 'Was die Agenten tun, einklappen'
+            }
+            onClick={toggle}
+            className="absolute top-[5px] right-1 flex size-6 items-center justify-center rounded-chip text-fg-subtle transition-colors hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+          >
+            <Icon name={closed ? 'chevronRight' : 'expandMore'} size={16} />
+          </button>
+        )}
+      </div>
+      {toggles &&
+        !closed &&
+        agents.map((agent) => (
+          <NavLink
+            key={agent.id}
+            to={sender?.agentPath(agent.id) ?? routes.cloudAgent(ui.workspace.id, agent.id)}
+            title={agent.title}
+            aria-current={false}
+            className={cn(rowClass({ isActive: false }), 'pl-[26px]')}
+          >
+            <AgentFace
+              agent={agent}
+              size={18}
+              showArea
+              areas={ui.home?.areas}
+              workspace={ui.workspace}
+              working
+              className="rounded-mark"
+            />
+            <span className="min-w-0 flex-1 truncate">{agent.title}</span>
+          </NavLink>
+        ))}
+      {toggles && !closed && asks.map((ask) => <AskRow key={ask.id} ask={ask} />)}
+    </div>
+  );
+}
+
+/** One ask of a page's (or a document's) AI: to that page, with its state shown in its bar. */
+function AskRow({ ask }: { ask: WriterAiAsk }) {
+  const ui = useCloud();
+  const page = appFor({ name: ask.fileName, fileType: null }, false) === 'page';
+  const said = ask.status === 'failed' ? ask.error : ask.summary;
+  return (
+    <NavLink
+      to={
+        page
+          ? routes.cloudPage(ui.workspace.id, ask.documentId)
+          : routes.document(ask.documentId, ask.commentId)
+      }
+      state={page ? { [PAGE_AGENT_STATE]: { asked: ask.id } } : undefined}
+      title={[ask.title, ASK_STATES[ask.status], said].filter(Boolean).join(' | ')}
+      aria-current={false}
+      className={cn(rowClass({ isActive: false }), 'pl-[26px]')}
+    >
+      <span className="relative flex size-[18px] shrink-0 items-center justify-center rounded-mark">
+        <Icon name={page ? 'notes' : 'article'} size={16} />
+        {ask.status === 'running' && (
+          <span
+            aria-hidden
+            className="ai-rim pointer-events-none absolute -inset-[1.5px] rounded-[inherit]"
+          />
+        )}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{ask.title}</span>
+      {ask.status === 'running' ? (
+        <span className="sr-only">Arbeitet</span>
+      ) : ask.status === 'failed' ? (
+        <Icon name="error" size={14} className="text-danger" label="Hat nicht geklappt" />
+      ) : ask.status === 'applied' || ask.status === 'answered' ? (
+        <Icon name="check" size={14} className="text-fg-subtle" label={ASK_STATES[ask.status]} />
       ) : null}
     </NavLink>
   );
@@ -783,9 +933,7 @@ export function CloudSidebar({
                   Seiten
                 </NavRow>
               )}
-              <NavRow to={routes.cloudAgents(workspace.id)} icon="autoAwesome">
-                Agenten
-              </NavRow>
+              <AgentsGroup />
               <NavRow to={routes.cloudTodos(workspace.id)} icon="checklist" count={myTodos}>
                 Aufgaben
               </NavRow>
