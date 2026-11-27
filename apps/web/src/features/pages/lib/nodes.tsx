@@ -1,6 +1,7 @@
 import {
   $applyNodeReplacement,
   $createParagraphNode,
+  $isTextNode,
   DecoratorNode,
   ElementNode,
   type EditorConfig,
@@ -184,8 +185,14 @@ export class WebChipNode extends DecoratorNode<ReactNode> {
    */
   markdown() {
     const alone = this.getParent()?.getChildrenSize() === 1;
-    const next = this.getNextSibling()?.getTextContent() ?? '';
-    const bare = !this.__pointy && !alone && readsBackAs(this.__url, next);
+    // What follows as written: only plain words are written as they read (`**.**` is not `.`).
+    const next = this.getNextSibling();
+    const after = !next
+      ? ''
+      : $isTextNode(next) && next.getFormat() === 0
+        ? next.getTextContent()
+        : null;
+    const bare = !this.__pointy && !alone && after !== null && readsBackAs(this.__url, after);
     return bare ? this.__url : `<${this.__url}>`;
   }
 

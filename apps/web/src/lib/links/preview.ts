@@ -19,6 +19,8 @@ export const useLinkScope = () => useContext(Scope);
 /** An address written out as one – `https://…` / `http://…` –, not a bare `example.com`. */
 export const WRITTEN_URL = /^https?:\/\/\S+$/i;
 
+const count = (text: string, char: string) => text.split(char).length - 1;
+
 /**
  * A line that is a web address and nothing else: its address and whether it was written in
  * pointy brackets (`<https://…>` – Markdown's way to say „a link, not a card“).
@@ -27,8 +29,10 @@ export function loneUrl(line: string): { url: string; pointy: boolean } | null {
   const trimmed = line.trim();
   const pointy = /^<(https?:\/\/[^\s<>]+)>$/i.exec(trimmed);
   if (pointy) return { url: pointy[1]!, pointy: true };
-  // Trailing punctuation belongs to a sentence, not to the address: such a line is no card.
-  if (WRITTEN_URL.test(trimmed) && !/[.,;:!?)\]]$/.test(trimmed)) {
+  // Trailing punctuation belongs to a sentence, not to the address: such a line is no card. A `)`
+  // closing a `(` in it is the address's own (`…/wiki/Foo_(Bar)`), as pages read it.
+  const unclosed = trimmed.endsWith(')') && count(trimmed, '(') < count(trimmed, ')');
+  if (WRITTEN_URL.test(trimmed) && !/[.,;:!?\]]$/.test(trimmed) && !unclosed) {
     return { url: trimmed, pointy: false };
   }
   return null;

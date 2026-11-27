@@ -39,6 +39,7 @@ import {
 } from './nodes';
 import { PAGE_NODES } from './transformers';
 import { $pasteWebAddress } from './web-links';
+import { loneUrl } from '@/lib/links';
 import type { Line } from './units';
 
 const ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -239,6 +240,15 @@ describe('page codec', () => {
       'paragraph:https://g.example/a,https://de.wikipedia.org/wiki/Foo_(Bar)',
       'page-web-card',
     ]);
+    // A line is a card by the same rule in free text (to-dos, notes, Sender).
+    expect(loneUrl('https://de.wikipedia.org/wiki/Foo_(Bar)')).toEqual({
+      url: 'https://de.wikipedia.org/wiki/Foo_(Bar)',
+      pointy: false,
+    });
+    expect([loneUrl('https://x.example/a)'), loneUrl('https://x.example/a.')]).toEqual([
+      null,
+      null,
+    ]);
     // Written so it reads back as itself: words right after a chip, an address not bare-readable.
     web.editor.update(
       () => {
@@ -249,7 +259,10 @@ describe('page codec', () => {
             $createWebChipNode('https://x.example/a.'),
             $createTextNode(' und '),
             $createWebChipNode('https://x.example'),
-            $createTextNode('.'),
+            $createTextNode('. '),
+            $createWebChipNode('https://y.example'),
+            $createWebChipNode('https://z.example'),
+            $createTextNode('.').toggleFormat('bold'),
           ),
           $createWebCardNode('https://x.example/a.'),
         );
@@ -257,7 +270,7 @@ describe('page codec', () => {
       { discrete: true },
     );
     expect(web.editor.getEditorState().read($pageMarkdown).split('\n').slice(-3)).toEqual([
-      '<https://x.example>-Seite, <https://x.example/a.> und https://x.example.',
+      '<https://x.example>-Seite, <https://x.example/a.> und https://x.example. <https://y.example><https://z.example>**.**',
       '',
       '<https://x.example/a.>',
     ]);
