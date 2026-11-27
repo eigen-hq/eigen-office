@@ -28,7 +28,8 @@ export function Component() {
       ? asked
       : 'slider';
   const scheme = tablet ? 'tablet' : app;
-  const name = tablet ? 'Eigen Office' : APP_NAMES[app];
+  // Only in compounds („Eigen-Office-App“), hyphenated like everywhere.
+  const name = tablet ? 'Eigen-Office' : APP_NAMES[app];
   const device = tablet ? 'Tablet' : 'Computer';
   const docTitle = tablet ? 'Eigen Office App | Eigen Office' : `${name} Desktop | ${name}`;
   const { data: me } = useMe();
