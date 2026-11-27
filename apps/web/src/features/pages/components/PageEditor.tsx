@@ -21,6 +21,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useEffectEvent, useRef } from 'react';
 import { documentLiveUrl, fetchDocument, sendDocumentEdit, writerKeys } from '@/lib/api/writer';
+import { INK_READ_TAG } from '../lib/ink-read';
 import { penState } from '../lib/pen';
 import { PageSync, type PageSyncState } from '../lib/sync';
 import { PAGE_NODES, PAGE_TRANSFORMERS } from '../lib/transformers';
@@ -28,6 +29,7 @@ import { PageAgent } from './PageAgent';
 import { DiagramPlugin } from './DiagramBlock';
 import { FormatBar } from './FormatBar';
 import { InAppLinks } from './InAppLinks';
+import { InkReader } from './InkReader';
 import { usePageHost } from './PageHost';
 import { PenCatcher } from './PenCatcher';
 import { SlashMenu } from './SlashMenu';
@@ -133,7 +135,8 @@ function PageBody({ opened, editing, onDone, onEdit, onSync, placeholder }: Page
     sync.current = page;
     page.load();
     const off = editor.registerUpdateListener(({ dirtyElements, dirtyLeaves, tags }) => {
-      if (tags.has('page-load') || !editor.isEditable()) return;
+      // What a drawing says, read by the AI (`InkReader`), is sent in Lesen too.
+      if (tags.has('page-load') || (!editor.isEditable() && !tags.has(INK_READ_TAG))) return;
       if (dirtyElements.size === 0 && dirtyLeaves.size === 0) return;
       page.changed();
     });
@@ -256,6 +259,7 @@ function PageBody({ opened, editing, onDone, onEdit, onSync, placeholder }: Page
       <ClickableLinkPlugin />
       <MarkdownShortcutPlugin transformers={PAGE_TRANSFORMERS} />
       <PenCatcher onEdit={onEdit} />
+      {canAsk && <InkReader documentId={id} />}
       {editing && <SlashMenu />}
       {editing && <DiagramPlugin />}
       {editing && <FormatBar />}

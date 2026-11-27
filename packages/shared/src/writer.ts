@@ -672,7 +672,8 @@ export const isWriterMarkdown = (name: string): boolean => /\.(md|markdown)$/i.t
 /**
  * A page's drawings by hand (```ink, one stroke a line of coordinates – `features/pages/lib/ink.ts`):
  * the lines of its strokes, by index. Nothing to read or search – a page of handwriting is
- * thousands of numbers – so the AI and the search leave them out; the fences stay.
+ * thousands of numbers – so the AI and the search leave them out; the fences stay, and so does
+ * the `text` line of what the handwriting says.
  */
 export function inkStrokeLines(lines: readonly string[]): Set<number> {
   const strokes = new Set<number>();
@@ -689,7 +690,7 @@ export function inkStrokeLines(lines: readonly string[]): Set<number> {
     }
     const trimmed = line.trim();
     if (trimmed.startsWith(fence) && /^[`~]+$/.test(trimmed)) fence = null;
-    else if (ink) strokes.add(index);
+    else if (ink && !/^\s*text\s/.test(line)) strokes.add(index);
   });
   return strokes;
 }

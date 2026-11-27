@@ -176,7 +176,7 @@ const titleOf = (name: string) => name.replace(/\.(odt|md|markdown)$/i, '');
 /** A text document or a Markdown file, as Writer reads and writes it. */
 type TextFile = OdtDocument | MarkdownDocument;
 
-async function loadDocument(
+export async function loadDocument(
   deps: DocumentDeps,
   userId: string,
   documentId: string,

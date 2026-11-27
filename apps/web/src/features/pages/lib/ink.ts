@@ -253,7 +253,10 @@ export function strokesMark(ink: Ink): string {
   return (hash >>> 0).toString(36);
 }
 
-/** The block with what its handwriting says (one line, before the fence); empty: none. */
+/**
+ * The block with what its handwriting says (one line, before the fence) – kept with the strokes'
+ * mark even when it says nothing (a sketch is not read again); no mark: the line gone.
+ */
 export function setTranscript(text: string, mark: string, said: string): string {
   const lines = text.split('\n');
   const { transcript } = parseInk(text);
@@ -262,7 +265,7 @@ export function setTranscript(text: string, mark: string, said: string): string 
     .replace(/\s+/g, ' ')
     .trim();
   if (transcript) lines.splice(transcript.line, 1);
-  if (clean) lines.splice(endOf(lines), 0, `text ${mark} ${clean}`);
+  if (mark) lines.splice(endOf(lines), 0, clean ? `text ${mark} ${clean}` : `text ${mark}`);
   return lines.join('\n');
 }
 

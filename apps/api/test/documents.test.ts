@@ -534,7 +534,13 @@ describe('Writer – text documents', () => {
         afterId: 'pink1',
         paragraph: plain('pen text 4 11 22 33 44'),
       },
-      { type: 'insertParagraph', id: 'pink3', afterId: 'pink2', paragraph: plain('```') },
+      {
+        type: 'insertParagraph',
+        id: 'pink4',
+        afterId: 'pink2',
+        paragraph: plain('text abc Milch / Eier'),
+      },
+      { type: 'insertParagraph', id: 'pink3', afterId: 'pink4', paragraph: plain('```') },
     ]);
     // The AI reads and writes the lines as they stand in the file, signs and all.
     await ctx.request(`/api/workspaces/${ctx.workspaceId}/integrations/keys`, {
@@ -576,8 +582,38 @@ describe('Writer – text documents', () => {
     expect(JSON.stringify(ai.requests.at(-1))).toContain('<p id=\\"L3\\">Ein **Absatz**.</p>');
     expect(JSON.stringify(ai.requests.at(-1))).toContain('```ink 300');
     expect(JSON.stringify(ai.requests.at(-1))).not.toContain('11 22 33 44');
+    // What the handwriting says (its `text` line) is read like the page's words.
+    expect(JSON.stringify(ai.requests.at(-1))).toContain('text abc Milch / Eier');
+    // The handwriting read from its picture: a PNG in, its words out; anything else refused.
+    ai.steps = [[{ type: 'text', text: 'Milch\nEier' } as Anthropic.Beta.BetaContentBlock]];
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    const read = await ctx.request(`/api/documents/${document.id}/ink-text`, {
+      method: 'POST',
+      headers: { 'content-type': 'image/png' },
+      body: png,
+    });
+    expect(read.status).toBe(200);
+    expect(await read.json()).toEqual({ text: 'Milch\nEier' });
+    expect(JSON.stringify(ai.requests.at(-1))).toContain('image/png');
+    const notPicture = await ctx.request(`/api/documents/${document.id}/ink-text`, {
+      method: 'POST',
+      headers: { 'content-type': 'image/png' },
+      body: 'pen text 4 1 2',
+    });
+    expect(notPicture.status).toBe(400);
     // A ```ink line inside another code block is that block's text, not a drawing.
-    const fenced = ['```md', '```ink', 'pen text 4 1 2', '```', '```ink 300', 'pen text 4 1 2', '```'];
+    const fenced = [
+      '```md',
+      '```ink',
+      'pen text 4 1 2',
+      '```',
+      '```ink 300',
+      'pen text 4 1 2',
+      '```',
+    ];
     expect([...inkStrokeLines(fenced)]).toEqual([5]);
     expect(text((await open()).content.blocks[3])).toBe('Ein **neuer** Absatz.');
   });

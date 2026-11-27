@@ -180,6 +180,10 @@ export const sendDocumentEdit = (documentId: string, input: WriterEditInput) =>
 export const uploadDocumentPicture = (documentId: string, file: Blob) =>
   postBytes<{ path: string }>(`${documentPath(documentId)}/pictures`, file, file.type);
 
+/** What a drawing's handwriting says, read by the AI from its picture (PNG). */
+export const readDocumentInk = (documentId: string, picture: Blob) =>
+  postBytes<{ text: string }>(`${documentPath(documentId)}/ink-text`, picture, 'image/png');
+
 /** Photos of the workspace's photo service for a search, as for a slide; empty: at random. */
 export const useDocumentPhotos = (documentId: string, query: string) =>
   useQuery({

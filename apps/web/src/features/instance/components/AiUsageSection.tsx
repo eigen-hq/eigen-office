@@ -24,6 +24,7 @@ const FEATURES: Record<AiFeature, { label: string; color: string }> = {
   office: { label: 'Dateien ordnen und finden', color: 'bg-sky' },
   document: { label: 'Dokumente ändern', color: 'bg-fg-subtle' },
   mail: { label: 'Mails schreiben', color: 'bg-accent-violet/50' },
+  handwriting: { label: 'Handschrift lesen', color: 'bg-accent-green/50' },
 };
 
 const minutes = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 });

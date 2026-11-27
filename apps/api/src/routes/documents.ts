@@ -26,6 +26,7 @@ import { aiLimits } from '../http/ai-limits';
 import { ApiError, badRequest, fileTooLarge } from '../http/errors';
 import { assertWithinLimit, fixedWindow } from '../http/rate-limit';
 import { readJson } from '../http/validate';
+import { MAX_INK_PICTURE_BYTES, readInk } from '../services/ink-text';
 import {
   listDocumentAi,
   moveDocumentAi,
@@ -184,6 +185,17 @@ export function documentsRoutes(deps: AppDeps, live = new DocumentLive()) {
           await addDocumentPicture(deps, userId, c.req.param('documentId'), type, bytes),
           201,
         );
+      })
+      // What a drawing's handwriting says – its picture in, its words out (`services/ink-text.ts`).
+      .post('/documents/:documentId/ink-text', viewer, async (c) => {
+        const userId = user(c);
+        assertWithinLimit(
+          c,
+          aiLimits(deps).aiRequests.hit(userId),
+          'Zu viele KI-Aufträge auf einmal. Bitte warte einen Moment.',
+        );
+        const bytes = await bodyBytes(c.req.raw, MAX_INK_PICTURE_BYTES);
+        return c.json(await readInk(deps, userId, c.req.param('documentId'), bytes));
       })
       .get('/documents/:documentId/tools', viewer, async (c) =>
         c.json<WriterTools>(await documentTools(deps, user(c), c.req.param('documentId'))),

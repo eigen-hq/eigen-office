@@ -445,7 +445,15 @@ describe('page codec', () => {
     expect(addStrokes(said, [{ ...stroke, points: [...stroke.points] }]).split('\n')[2]).toMatch(
       /^draw /,
     );
-    expect(setTranscript(said, 'abc', '')).toBe('```ink 300\npen text 4 10 10 20 20\n```');
+    expect(setTranscript(said, 'abc', '')).toBe(
+      '```ink 300\npen text 4 10 10 20 20\ntext abc\n```',
+    );
+    expect(parseInk(setTranscript(said, 'abc', '')).transcript).toEqual({
+      line: 2,
+      mark: 'abc',
+      text: '',
+    });
+    expect(setTranscript(said, '', '')).toBe('```ink 300\npen text 4 10 10 20 20\n```');
     expect(strokesMark(parseInk(said))).not.toBe(
       strokesMark(parseInk(addStrokes(said, [{ ...stroke, points: [...stroke.points] }]))),
     );

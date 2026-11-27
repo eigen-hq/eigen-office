@@ -1,5 +1,5 @@
 import type { AccentColor } from '@slider/shared';
-import { $getNodeByKey, type NodeKey } from 'lexical';
+import { $createParagraphNode, $createTextNode, $getNodeByKey, type NodeKey } from 'lexical';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { accentColor, ACCENT_COLOR_NAMES } from '@/lib/accent';
 import { isTextTarget } from '@/lib/dom';
@@ -8,6 +8,7 @@ import {
   ColorSwatches,
   IconButton,
   SegmentedControl,
+  Spinner,
   Toolbar,
   ToolbarDivider,
   type IconName,
@@ -45,7 +46,9 @@ import {
   type PenStart,
   type PenTool,
 } from '../lib/pen';
+import { readInkNow } from '../lib/ink-read';
 import { recognize } from '../lib/shapes';
+import { usePageHost } from './PageHost';
 import { useBlockPick } from './useBlockPick';
 
 /*
@@ -604,6 +607,56 @@ export function InkBlock({ text, nodeKey }: { text: string; nodeKey: NodeKey }) 
   const pickSize = (next: number) =>
     setPen((now) => ({ [inkToolOf(now.tool)]: { ...now[inkToolOf(now.tool)], size: next } }));
 
+  // ── What the handwriting says: copied, or the drawing turned into its text (as Notes does).
+
+  const host = usePageHost();
+  const [reading, setReading] = useState(false);
+  const hasInk = ink.strokes.length > 0;
+  /** The words, line by line – `null` (told) when there are none or they could not be read. */
+  const words = async (): Promise<string | null> => {
+    setReading(true);
+    const said = await readInkNow(editor, nodeKey).finally(() => setReading(false));
+    if (said === null) host.notify('Die Handschrift ließ sich nicht lesen.', 'danger');
+    else if (!said.trim()) host.notify('In dieser Zeichnung steht kein Text.');
+    return said?.trim() ? said.trim() : null;
+  };
+  const copyText = () => {
+    // Asked while the click still counts (Safari): the text follows once read.
+    const read = words();
+    const blob = read.then((said) => {
+      if (said === null) throw new Error('Nothing to copy');
+      return new Blob([said], { type: 'text/plain' });
+    });
+    navigator.clipboard
+      .write([new ClipboardItem({ 'text/plain': blob })])
+      .then(() => host.notify('Text kopiert'))
+      .catch(async () => {
+        const said = await read;
+        if (said === null) return;
+        await navigator.clipboard.writeText(said);
+        host.notify('Text kopiert');
+      })
+      .catch(() => host.notify('Der Text ließ sich nicht kopieren.', 'danger'));
+  };
+  const toText = async () => {
+    const said = await words();
+    if (said === null) return;
+    editor.update(() => {
+      const node = $getNodeByKey(nodeKey);
+      if (!$isRawBlockNode(node)) return;
+      const lines = said.split('\n').filter((line) => line.trim());
+      let last = null;
+      for (const line of lines) {
+        const paragraph = $createParagraphNode().append($createTextNode(line.trim()));
+        node.insertBefore(paragraph);
+        last = paragraph;
+      }
+      node.remove();
+      last?.selectEnd();
+    });
+    setPen({ at: null });
+  };
+
   // ── The grip below: dragged, the drawing is as tall as it is pulled (not shorter than its ink).
 
   const grip = useRef<{ id: number; y: number; from: number } | null>(null);
@@ -807,6 +860,28 @@ export function InkBlock({ text, nodeKey }: { text: string; nodeKey: NodeKey }) 
               ))
             )}
             <ToolbarDivider />
+            {reading ? (
+              <span className="flex size-7 items-center justify-center" aria-label="Wird gelesen">
+                <Spinner size={16} />
+              </span>
+            ) : (
+              <>
+                <IconButton
+                  size="sm"
+                  icon="contentCopy"
+                  label="Als Text kopieren"
+                  disabled={!hasInk}
+                  onClick={copyText}
+                />
+                <IconButton
+                  size="sm"
+                  icon="textFields"
+                  label="In Text umwandeln"
+                  disabled={!hasInk}
+                  onClick={() => void toText()}
+                />
+              </>
+            )}
             {/* The drawing whole, picked – ⌫ deletes it, as a picture. */}
             <IconButton size="sm" icon="cursorBox" label="Zeichnung auswählen" onClick={pick} />
           </Toolbar>
