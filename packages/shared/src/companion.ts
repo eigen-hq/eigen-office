@@ -20,11 +20,14 @@ export const DEFAULT_COMPANION_MODE: CompanionMode = 'auto';
 export const COMPANION_KINDS = [
   /** A mail: `id` the thread. */
   'mail',
-  /** A conversation in Sender: `id` the channel. */
+  /** A conversation: `id` the channel; `null` with `sub` an area – its own channel (the first). */
   'chat',
   /** The calendar: `sub` the day (YYYY-MM-DD), `id` the event open beside it, if one is. */
   'calendar',
-  /** Cloud: `id` the file (or folder) whose details are open; `null` a folder's files. */
+  /**
+   * Cloud: `id` the file (or folder) whose details are open – a page or a diagram open is its file
+   * too; `null` a folder's files.
+   */
   'file',
   /** A presentation: `id` the deck, `sub` the slide on screen. */
   'deck',
@@ -32,6 +35,8 @@ export const COMPANION_KINDS = [
   'document',
   /** A PDF (Reader): `id` the PDF. */
   'pdf',
+  /** A to-do open beside a page of Cloud: `id` the to-do. */
+  'todo',
   /** Anything else: today's to-dos and events, and the AI. */
   'page',
 ] as const;

@@ -35,6 +35,7 @@ const KIND_WORDS = {
   deck: 'Präsentation',
   document: 'Dokument',
   pdf: 'PDF',
+  todo: 'Aufgabe',
   page: 'Am Computer',
 } as const;
 

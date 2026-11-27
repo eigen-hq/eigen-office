@@ -33,6 +33,20 @@ describe('companion', () => {
       sub: '2026-12-03',
     });
     expect(at('/w/w1/dateien/ordner/f1?datei=n1')).toMatchObject({ kind: 'file', id: 'n1' });
+    // A page and a diagram open are their files; a to-do's panel lies over everything.
+    expect(at('/w/w1/dateien/seite/p1')).toMatchObject({ kind: 'file', id: 'p1' });
+    expect(at('/diagramm/g1')).toMatchObject({ kind: 'file', id: 'g1', workspaceId: 'w0' });
+    expect(at('/w/w1/dateien/aufgaben?aufgabe=t9&datei=n1')).toMatchObject({
+      kind: 'todo',
+      id: 't9',
+    });
+    expect(at('/w/w1/dateien/aufgaben').kind).toBe('page');
+    // An area's chat without a channel: the area, its own channel found on the phone.
+    expect(at('/w/w1/dateien/bereich/a1/chat')).toMatchObject({
+      kind: 'chat',
+      id: null,
+      sub: 'a1',
+    });
     // Outside a workspace's address: the workspace one is in.
     expect(at('/d/d1?slide=s3')).toMatchObject({
       kind: 'deck',

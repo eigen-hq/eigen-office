@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { matchPath, useLocation } from 'react-router';
 import { useCallsOrNull } from '@/features/calls';
-import { queryKeys, readerKeys, writerKeys } from '@/lib/api';
+import { diagramKeys, queryKeys, readerKeys, writerKeys } from '@/lib/api';
 import { api } from '@/lib/api-client';
 import { onCallHere, ownCallHere } from '@/lib/call-here';
 import { useCompanionHeard } from '@/lib/companion';
@@ -52,14 +52,15 @@ function useInUse(on: boolean): boolean {
 }
 
 /**
- * The workspace of the presentation, document or PDF open – their addresses (`/d/`, `/t/`, `/r/`)
- * name none: read from what the page loaded (no request of its own).
+ * The workspace of the presentation, document, PDF or diagram open – their addresses (`/d/`, `/t/`,
+ * `/r/`, `/diagramm/`) name none: read from what the page loaded (no request of its own).
  */
 function useOpenedWorkspace(pathname: string): string | null {
   const queryClient = useQueryClient();
   const deck = matchPath('/d/:id', pathname)?.params.id;
   const document = matchPath('/t/:id', pathname)?.params.id;
   const pdf = matchPath('/r/:id', pathname)?.params.id;
+  const diagram = matchPath('/diagramm/:id', pathname)?.params.id;
   const read = (): string | null => {
     if (deck)
       return (
@@ -75,6 +76,11 @@ function useOpenedWorkspace(pathname: string): string | null {
       return (
         queryClient.getQueryData<{ pdf: { workspaceId: string } }>(readerKeys.pdf(pdf))?.pdf
           .workspaceId ?? null
+      );
+    if (diagram)
+      return (
+        queryClient.getQueryData<{ file: { workspaceId: string } }>(diagramKeys.diagram(diagram))
+          ?.file.workspaceId ?? null
       );
     return null;
   };

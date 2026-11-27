@@ -12,11 +12,12 @@ import {
   useRemoveSenderAgent,
   useSenderMessages,
   useSlides,
+  useTodos,
   writerKeys,
 } from '@/lib/api';
 import { api } from '@/lib/api-client';
 import { useCallHere } from '@/lib/call-here';
-import { CLOUD_EVENT_PARAM } from '@/lib/routes';
+import { CLOUD_EVENT_PARAM, CLOUD_TODO_PARAM } from '@/lib/routes';
 import {
   ActivityFeed,
   AsidePart,
@@ -64,7 +65,8 @@ export function CompanionBody(props: BodyProps) {
     case 'mail':
       return view.id ? <MailBody {...props} id={view.id} /> : <TodayBody />;
     case 'chat':
-      return view.id ? <ChatBody {...props} id={view.id} /> : <TodayBody />;
+      if (view.id) return <ChatBody {...props} id={view.id} />;
+      return view.sub ? <AreaChatBody {...props} areaId={view.sub} /> : <TodayBody />;
     case 'calendar':
       return <CalendarBody {...props} />;
     case 'file':
@@ -75,6 +77,8 @@ export function CompanionBody(props: BodyProps) {
       return view.id ? <DocumentBody id={view.id} /> : <TodayBody />;
     case 'pdf':
       return view.id ? <PdfBody id={view.id} /> : <TodayBody />;
+    case 'todo':
+      return view.id ? <TodoBody {...props} id={view.id} /> : <TodayBody />;
     default:
       return <TodayBody />;
   }
@@ -120,6 +124,51 @@ function ChatBody({ workspace, id }: BodyProps & { id: string }) {
   return (
     <Column>
       <ChatAgents channel={channel} add={null} onRemove={(agent) => remove.mutate(agent.id)} />
+    </Column>
+  );
+}
+
+/** An area's chat without a channel named: its own (the first), as the computer shows it. */
+function AreaChatBody(props: BodyProps & { areaId: string }) {
+  const sender = useSenderOrNull();
+  const own = sender?.home?.areas.find((each) => each.id === props.areaId)?.channels[0];
+  if (!sender?.home) return null;
+  return own ? <ChatBody {...props} id={own.id} /> : <TodayBody />;
+}
+
+/* ---------- Aufgabe: the to-do, opened beside on a tap ---------- */
+
+function TodoBody({ workspace, id }: BodyProps & { id: string }) {
+  const todos = useTodos(workspace.id);
+  const todo = todos.data?.find((each) => each.id === id);
+  const [, setParams] = useSearchParams();
+  useCompanionTitle(todo?.title);
+  useCallHere('companion-todo', todo ? `Aufgabe #${todo.number}: ${todo.title}` : null);
+  if (todos.isPending) return null;
+  if (!todo) return <TodayBody />;
+  const due = todo.dueOn ? `fällig ${dayFormat.format(at(todo.dueOn))}` : null;
+  return (
+    <Column>
+      <AsidePart label={`Aufgabe #${todo.number}`} icon="checklist">
+        <button
+          type="button"
+          // Opened here, beside (`TodoPanel`) – the computer keeps its own.
+          onClick={() => setParams({ [CLOUD_TODO_PARAM]: id })}
+          className="flex w-full flex-col gap-1 rounded-control bg-surface-1 px-3 py-2.5 text-left hover:bg-hover"
+        >
+          <span className="text-body font-semibold text-fg">{todo.title}</span>
+          {(due || todo.assignee) && (
+            <span className="text-caption text-fg-muted">
+              {[due, todo.assignee?.name].filter(Boolean).join(' | ')}
+            </span>
+          )}
+          {todo.description && (
+            <span className="line-clamp-6 text-body whitespace-pre-line text-fg-muted">
+              {todo.description}
+            </span>
+          )}
+        </button>
+      </AsidePart>
     </Column>
   );
 }
