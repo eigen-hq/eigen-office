@@ -636,6 +636,7 @@ function EventForm({
         fields={fields}
         calendars={editable.length ? editable : calendar ? [calendar] : []}
         canEdit={event.canEdit}
+        previews={!!calendar && !calendar.mailAccountId}
         onFields={setFields}
         onKeep={keep}
         onPaste={attach.onPaste}
@@ -784,6 +785,7 @@ function Fields({
   fields,
   calendars,
   canEdit,
+  previews = true,
   autoFocus = false,
   onFields,
   onKeep = onFields,
@@ -794,6 +796,11 @@ function Fields({
   fields: Fields;
   calendars: Calendar[];
   canEdit: boolean;
+  /**
+   * The notes' web addresses as chips and cards (fetched by the server). Not a mail calendar's:
+   * their notes are often an organizer's invitation (one-time, RSVP and „seen“ links).
+   */
+  previews?: boolean;
   autoFocus?: boolean;
   /** As typed. */
   onFields: (fields: Fields) => void;
@@ -806,6 +813,8 @@ function Fields({
   /** Under the notes: its files and the clip. */
   files?: ReactNode;
 }) {
+  // Notes from outside (a mail calendar's) stay the plain field: nothing in them is fetched.
+  const Notes = previews ? WebTextarea : AutosizeTextarea;
   const set = (change: Partial<Fields>) => onKeep({ ...fields, ...change });
   // The panel takes the focus as it opens (`SidePanel`); a new one's title takes it after.
   const titleRef = useRef<HTMLTextAreaElement>(null);
@@ -925,7 +934,7 @@ function Fields({
           className="flex-1 resize-none bg-transparent text-sm text-fg outline-none placeholder:text-fg-faint"
         />
       </div>
-      <WebTextarea
+      <Notes
         value={fields.notes}
         readOnly={!canEdit}
         onChange={(event) => onFields({ ...fields, notes: event.target.value })}
