@@ -86,9 +86,13 @@ export function useKept<T>(
       writeJson(own, before);
       goingUp.add(local);
       // The browser's copy goes only once the server has it (offline, it is tried next time).
+      // Refused (offline, a server error), it stays marked: tried again on the next load, not in a
+      // loop of refetch and upload.
       send.mutate(() => before, {
-        onSuccess: () => writeString(local, null),
-        onSettled: () => goingUp.delete(local),
+        onSuccess: () => {
+          writeString(local, null);
+          goingUp.delete(local);
+        },
       });
     }
     // Once the server answered (and when what it keeps changes) – not on every render.
