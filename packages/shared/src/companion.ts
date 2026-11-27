@@ -43,6 +43,9 @@ export const COMPANION_KINDS = [
 export const companionKindSchema = z.enum(COMPANION_KINDS);
 export type CompanionKind = z.infer<typeof companionKindSchema>;
 
+/** Slides a show's report names at most – a longer deck's phone goes by the slides it loaded. */
+export const MAX_COMPANION_SLIDE_IDS = 1000;
+
 const idSchema = z.string().min(1).max(200).nullable();
 
 /**
@@ -61,7 +64,7 @@ export const companionShowSchema = z.object({
    * The slides the show steps through, as the computer fixed them when it began (a slide hidden or
    * added meanwhile does not change them) – the phone's next slide and notes follow these.
    */
-  slideIds: z.array(z.string().min(1).max(200)).max(1000).optional(),
+  slideIds: z.array(z.string().min(1).max(200)).max(MAX_COMPANION_SLIDE_IDS).optional(),
 });
 export type CompanionShow = z.infer<typeof companionShowSchema>;
 

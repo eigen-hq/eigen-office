@@ -8,7 +8,7 @@ import {
   useState,
   type RefObject,
 } from 'react';
-import type { CompanionCommand } from '@slider/shared';
+import { MAX_COMPANION_SLIDE_IDS, type CompanionCommand } from '@slider/shared';
 import { useSearchParams } from 'react-router';
 import { useCommandKeyClaim } from '@/features/commands';
 import { onCompanionCommand, setCompanionShow } from '@/lib/companion';
@@ -132,7 +132,9 @@ export function useShowRemote({
   const shownId = ended ? null : slideId;
   const ids = slides.map((slide) => slide.id).join('\n');
   useEffect(() => {
-    const slideIds = ids ? ids.split('\n') : [];
+    const all = ids ? ids.split('\n') : [];
+    // Past what a report takes, the phone goes by the slides it loaded itself.
+    const slideIds = all.length <= MAX_COMPANION_SLIDE_IDS ? all : undefined;
     setCompanionShow({ deckId, slideId: shownId, ended, black, startedAt, slideIds });
   }, [deckId, shownId, ended, black, startedAt, ids]);
   useEffect(() => () => setCompanionShow(null), []);
