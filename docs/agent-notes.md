@@ -3226,6 +3226,36 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   Export `anrufe.json` (own words + notes), deletion anonymises (`anonymiseCalls`). In a scratch
   check `page.route` the agent's GET (add a message with `call`) and `/api/calls/*/record`.
 
+## Companion – „Handy als Begleiter“ (`features/companion/`, `services/companion.ts`, `lib/companion.ts`)
+
+- The phone beside the computer shows what goes with the computer's page at `/begleiter`: mail →
+  „KI zur Mail“ (`MailAside`), chat → its agents, calendar → the event / the day's column, file →
+  preview + Verlauf, deck → the slide shown + its open comments, Writer/Reader → comments, anything
+  else → coming events + own to-dos. Below it the workspace's AI (`CompanionChat`, Cloud's chat
+  with `here`) and the call button in the header; mail and calendar have their own „Nachfragen“,
+  so no field below there (`ASKS_ITSELF`).
+- Wire: every tab (`CompanionWatch`, in `router.tsx`) posts `POST /calls/companion` `{peerId,
+  device, active, view}` whenever that changes (page, lines, in front / left; debounced); `CompanionHub` (memory) keeps the
+  newest desktop per user and sends SSE `companion` on the existing `/calls/live`. `view` comes
+  from the path (`lib/view.ts` `viewOf`) plus the page's call-here lines (`ownCallHere`) – so the
+  agent on the phone knows what the computer shows. Phone = coarse pointer and narrow; the desk is
+  „active“ with its tab in front and input in the last 2 min (`COMPANION_RECENT_MS`), „there“ for
+  60 min (`COMPANION_GONE_MS`).
+- Setting `users.companion` (`auto` default | `ask` | `never`), Konto › Einstellungen and the
+  agents' `change_settings`. `auto` opens it on the phone only when it lies there (seen, untouched
+  20 s, no field focused, no call) and the computer is in use, not again after ✕ until the computer
+  was left (`lib/auto.ts` `opensByItself`). `ask` (and `auto` once left): `CompanionButton`, an icon
+  left of the date in the header on a phone, green dot while the computer is in use – no pop-up.
+- Screen Wake Lock (`lib/wake-lock.ts`) only while the computer is there; re-taken on
+  `visibilitychange` (browsers drop it when hidden). Needs https (localhost counts).
+- Per browser, not shown on the phone unless set there: the mail agent mapping
+  (`slider.mail.agents`) and hidden calendars. A deck's workspace is the last-used one (`/d/:id`
+  has none in its path); an area chat without a channel id shows the default body.
+- Check: web `features/companion/lib/companion.test.ts` (`viewOf`, `opensByItself`, `offered`),
+  api `calls.test.ts` (hub, SSE), `cloud.test.ts` „opens an area …“ (`here` in the prompt),
+  `account-data.test.ts` (setting, export); by hand two browsers – one at phone size
+  (coarse pointer) – signed in as the same person.
+
 ## Hosted instance – office.bertro.dev, formerly slider.bertro.dev
 
 - A new release reaches an app left open (an installed one, for days) by `lib/app-version.ts`:
