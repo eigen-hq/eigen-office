@@ -3006,6 +3006,8 @@ describe('Sender – the workspace’s messages', () => {
     expect((await card('https://nur-titel.example/', '/icon')).status).toBe(404);
     expect((await card('https://nur-titel.example/', '/image')).status).toBe(404);
     expect((await card('https://news.example/artikel?id=7')).status).toBe(200);
+    // An address whose hash begins with `_` (a key segment that the storage refuses in base64url).
+    expect((await card('https://www.figma.com')).status).toBe(204);
     for (const refused of [
       'http://news.example/',
       'https://www.lan-firma.de/',
@@ -3022,6 +3024,7 @@ describe('Sender – the workspace’s messages', () => {
       'https://news.example/favicon.ico',
       'https://nur-titel.example/',
       'https://nur-titel.example/favicon.ico',
+      'https://www.figma.com/',
     ]);
     // None found is kept a day, a logo seven.
     (ctx.deps.clock as TestClock).advance(2 * 86_400_000);

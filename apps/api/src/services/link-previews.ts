@@ -45,7 +45,8 @@ const MIN_ICON_PX = 16;
 const MAX_ICON_TRIES = 2;
 
 const PREFIX = 'link-previews/';
-const keyOf = (url: string) => `${PREFIX}${createHash('sha256').update(url).digest('base64url')}`;
+// Hex: a key segment must start with a letter or digit, base64url's `-`/`_` would not (1 in 32).
+const keyOf = (url: string) => `${PREFIX}${createHash('sha256').update(url).digest('hex')}`;
 
 /** What is kept of an address: when it was looked up and what was found (`null`: nothing). */
 interface Kept {
