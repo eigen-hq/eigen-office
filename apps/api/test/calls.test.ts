@@ -10,6 +10,7 @@ import {
   type CallState,
   type CallOrder,
   type CallRecord,
+  type CompanionEvent,
   type SenderEvent,
   type SenderHome,
   type SenderMessagePage,
@@ -71,6 +72,8 @@ async function tab(peer: string, cookie: string) {
   const reader = res.body!.getReader();
   open.push(() => void reader.cancel().catch(() => {}));
   const heard: CallEvent[] = [];
+  // The phone beside the computer hears on the same stream (event `companion`).
+  const companion: CompanionEvent[] = [];
   const decoder = new TextDecoder();
   let buffer = '';
   void (async () => {
@@ -79,12 +82,13 @@ async function tab(peer: string, cookie: string) {
       if (done) return;
       buffer += decoder.decode(value, { stream: true });
       for (let end = buffer.indexOf('\n\n'); end >= 0; end = buffer.indexOf('\n\n')) {
-        const data = buffer
-          .slice(0, end)
-          .split('\n')
-          .find((line) => line.startsWith('data: '));
+        const lines = buffer.slice(0, end).split('\n');
+        const data = lines.find((line) => line.startsWith('data: '));
         buffer = buffer.slice(end + 2);
-        if (data) heard.push(JSON.parse(data.slice(6)) as CallEvent);
+        if (!data) continue;
+        if (lines.includes('event: companion'))
+          companion.push(JSON.parse(data.slice(6)) as CompanionEvent);
+        else heard.push(JSON.parse(data.slice(6)) as CallEvent);
       }
     }
   })().catch(() => {});
@@ -94,7 +98,12 @@ async function tab(peer: string, cookie: string) {
       expect(found).toBeTruthy();
       return found as Extract<CallEvent, { type: T }>;
     });
-  return { heard, last };
+  const desk = () =>
+    vi.waitFor(() => {
+      expect(companion.length).toBeGreaterThan(0);
+      return companion.at(-1)!.desk;
+    });
+  return { heard, last, companion, desk };
 }
 
 describe('Calls – in a conversation, heard on every page', () => {
@@ -160,6 +169,42 @@ describe('Calls – in a conversation, heard on every page', () => {
       ).status,
     ).toBe(404);
     expect(carls.heard.map((event) => event.type)).toEqual(['hello']);
+
+    // The phone beside the computer: Anna's desk tab says it shows a mail – her phone hears it
+    // on its call stream, Carl nothing of it; in front or not.
+    const annasPhone = await tab('anna-phone-0001', anna.cookie);
+    expect(await annasPhone.desk()).toBeNull();
+    const view = {
+      kind: 'mail',
+      workspaceId: ctx.workspaceId,
+      id: 'thread-1',
+      sub: null,
+      title: 'Angebot Müller',
+      path: '/x',
+      here: 'Mail „Angebot Müller“',
+    };
+    const report = (peerId: string, body: object, cookie = anna.cookie) =>
+      send('POST', '/calls/companion', { peerId, ...body }, cookie);
+    expect(
+      (await report('anna-phone-0001', { device: 'phone', active: true, view: null })).status,
+    ).toBe(204);
+    expect((await report('anna-tab-0001', { device: 'desk', active: true, view })).status).toBe(
+      204,
+    );
+    await vi.waitFor(() =>
+      expect(annasPhone.companion.at(-1)?.desk).toMatchObject({ view, active: true }),
+    );
+    expect((await annas.desk())?.view.id).toBe('thread-1');
+    await report('anna-tab-0001', { device: 'desk', active: false, view });
+    await vi.waitFor(() => expect(annasPhone.companion.at(-1)?.desk?.active).toBe(false));
+    // A phone's own page is never what the companion shows.
+    await report('anna-phone-0001', { device: 'phone', active: true, view: { ...view, id: 'x' } });
+    expect((await annasPhone.desk())?.view.id).toBe('thread-1');
+    expect(carls.companion.every((event) => event.desk === null)).toBe(true);
+    expect(
+      (await report('anna-tab-0001', { device: 'desk', active: true, view: { kind: 'nope' } }))
+        .status,
+    ).toBe(400);
 
     // Ben answers: he connects to Anna's tab; it rings no more.
     const answered = (await (

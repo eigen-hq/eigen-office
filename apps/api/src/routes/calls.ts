@@ -14,6 +14,8 @@ import {
   callSignalSchema,
   callHushSchema,
   callTranscriptSchema,
+  companionReportSchema,
+  COMPANION_SSE_EVENT,
   MAX_CALL_UTTERANCE,
   type AccountAuthor,
 } from '@slider/shared';
@@ -24,6 +26,7 @@ import { ApiError, badRequest } from '../http/errors';
 import { assertWithinLimit, fixedWindow } from '../http/rate-limit';
 import { readJson } from '../http/validate';
 import type { CallHub } from '../services/calls';
+import { CompanionHub } from '../services/companion';
 import { getCallRecord } from '../services/call-records';
 import { failureMessage, isProviderError } from '../services/ai-providers';
 import { liveTokenFor, SpeechProblem, transcribePiece } from '../services/voice/session';
@@ -36,6 +39,7 @@ import { liveTokenFor, SpeechProblem, transcribePiece } from '../services/voice/
 const HEARTBEAT_MS = 10_000;
 const ACCESS_CHECK_MS = 60_000;
 const CALL_EVENT = 'call';
+const COMPANION_EVENT = COMPANION_SSE_EVENT;
 /** A turn of at most ~30 s, 16 kHz mono 16 bit, as WAV. */
 const MAX_TURN_AUDIO_BYTES = 2 * 1024 * 1024 + 64 * 1024;
 /** LiveKit's webhooks are a few hundred bytes of JSON. */
@@ -50,7 +54,11 @@ const MAX_SFU_EVENT_BYTES = 64 * 1024;
  */
 const HOUR_MS = 60 * 60_000;
 
-export function callRoutes(deps: AppDeps, calls: CallHub) {
+export function callRoutes(
+  deps: AppDeps,
+  calls: CallHub,
+  companion = new CompanionHub(() => deps.clock.now().getTime()),
+) {
   const viewer = viewerMiddleware(deps);
   // As for speaking to the AI (`routes/voice.ts`): a token per connection to the live stream,
   // a turn every few seconds while someone speaks for an hour – each on the workspace's keys.
@@ -254,7 +262,17 @@ export function callRoutes(deps: AppDeps, calls: CallHub) {
             if (!open()) return;
             stream.writeSSE({ event: CALL_EVENT, data: JSON.stringify(event) }).catch(() => {});
           });
-          stream.onAbort(leave);
+          // The phone beside the computer hears on the same stream what the computer shows.
+          const leaveCompanion = companion.connect(userId, peer.data, (event) => {
+            if (!open()) return;
+            stream
+              .writeSSE({ event: COMPANION_EVENT, data: JSON.stringify(event) })
+              .catch(() => {});
+          });
+          stream.onAbort(() => {
+            leave();
+            leaveCompanion();
+          });
           let checkedAt = Date.now();
           try {
             await stream.write(': open\n\n');
@@ -270,8 +288,14 @@ export function callRoutes(deps: AppDeps, calls: CallHub) {
             }
           } finally {
             leave();
+            leaveCompanion();
           }
         });
+      })
+      /** What this tab is (phone or desk), whether it is in front, and what its page is about. */
+      .post('/calls/companion', viewer, async (c) => {
+        companion.report(me(c).id, await readJson(c, companionReportSchema));
+        return c.body(null, 204);
       })
   );
 }
