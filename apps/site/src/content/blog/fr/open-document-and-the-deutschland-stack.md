@@ -76,6 +76,6 @@ Le Schleswig-Holstein a fait d’ODF son format par défaut en 2024 et comptait 
 4. **Incorporez les polices ou prenez-en de libres.** La plupart des écarts de mise en page entre logiciels viennent de polices manquantes.
 5. **Envoyez du PDF/UA quand rien ne doit plus changer.** ODF est pour le travail en cours.
 
-## Où se situe The Office
+## Où se situe Eigen Office
 
-The Office repose sur ODF dès le premier fichier. Slider modifie un vrai ODP, pas un format interne exporté à la fin. Ce que vous téléchargez est le fichier lui-même, lisible dans LibreOffice et dans tout autre logiciel qui suit la norme.
+Eigen Office repose sur ODF dès le premier fichier. Slider modifie un vrai ODP, pas un format interne exporté à la fin. Ce que vous téléchargez est le fichier lui-même, lisible dans LibreOffice et dans tout autre logiciel qui suit la norme.

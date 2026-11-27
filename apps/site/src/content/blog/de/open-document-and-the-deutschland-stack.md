@@ -76,6 +76,6 @@ Schleswig-Holstein hat ODF 2024 zum Standardformat gemacht und hatte Ende 2025 r
 4. **Bette Schriften ein oder nimm freie.** Die meisten Unterschiede im Layout zwischen Programmen sind fehlende Schriften.
 5. **Verschick PDF/UA, wenn sich nichts mehr ändern soll.** ODF ist für Arbeit, die noch läuft.
 
-## Wo The Office steht
+## Wo Eigen Office steht
 
-The Office baut von der ersten Datei an auf ODF. Slider bearbeitet eine echte ODP, kein internes Format, das am Ende exportiert wird. Was du herunterlädst, ist die Datei selbst, lesbar in LibreOffice und jedem anderen Programm, das dem Standard folgt.
+Eigen Office baut von der ersten Datei an auf ODF. Slider bearbeitet eine echte ODP, kein internes Format, das am Ende exportiert wird. Was du herunterlädst, ist die Datei selbst, lesbar in LibreOffice und jedem anderen Programm, das dem Standard folgt.

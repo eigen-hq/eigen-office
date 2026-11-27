@@ -25,9 +25,9 @@ const en = {
     cloud: 'Files',
   } as Record<ProductId, string>,
   office: {
-    metaTitle: 'The Office | Presentations, documents, numbers, forms, conversations and files in one place',
+    metaTitle: 'Eigen Office | Presentations, documents, numbers, forms, conversations and files in one place',
     metaDescription:
-      'The Office is six apps that work as one: Slider for presentations, Writer for documents, Solver for numbers, Reader for forms, Sender for conversations and Cloud for files. One account, one AI, one plan. Slider, Reader, Sender and Cloud are available now.',
+      'Eigen Office is six apps that work as one: Slider for presentations, Writer for documents, Solver for numbers, Reader for forms, Sender for conversations and Cloud for files. One account, one AI, one plan. Slider, Reader, Sender and Cloud are available now.',
     title: ['Present. Write.', 'Calculate. Share.'],
     sub: 'The AI native office for Open Document. Presentations, documents, numbers and files your team and the AI work on together.',
     cta: 'Open Slider',
@@ -78,7 +78,7 @@ const en = {
     writer: {
       metaTitle: 'Writer | Documents you write together',
       metaDescription:
-        'Writer is the calm page where your team and the AI write together. What you see is what gets printed. Part of The Office, coming soon.',
+        'Writer is the calm page where your team and the AI write together. What you see is what gets printed. Part of Eigen Office, coming soon.',
       tagline: 'Documents you write together.',
       line: 'A calm page where your team and the AI write together. What you see is what gets printed.',
       principles: [
@@ -99,7 +99,7 @@ const en = {
     solver: {
       metaTitle: 'Solver | Numbers that explain themselves',
       metaDescription:
-        'Solver keeps every number once, in real tables. Ask in plain words, build dashboards and trace each figure back to its row. Part of The Office, coming soon.',
+        'Solver keeps every number once, in real tables. Ask in plain words, build dashboards and trace each figure back to its row. Part of Eigen Office, coming soon.',
       tagline: 'Numbers that explain themselves.',
       line: 'Your numbers live once, in real tables. Ask in plain words and trace every figure back to its row.',
       principles: [
@@ -120,7 +120,7 @@ const en = {
     reader: {
       metaTitle: 'Reader | Forms you fill in and sign together',
       metaDescription:
-        'Reader opens the files you get, lets you fill them in, sign them and discuss them on the page with your team and the AI. Part of The Office.',
+        'Reader opens the files you get, lets you fill them in, sign them and discuss them on the page with your team and the AI. Part of Eigen Office.',
       tagline: 'Forms you fill in and sign together.',
       line: 'Open the file you got, fill it in, sign it and discuss it right on the page. The AI answers from what it says and fills in the form.',
       principles: [
@@ -141,7 +141,7 @@ const en = {
     sender: {
       metaTitle: 'Sender | Conversations that matter',
       metaDescription:
-        'Sender is where your team talks: a channel for every area, groups and direct messages, calls, your mail and your agents in one place. Part of The Office.',
+        'Sender is where your team talks: a channel for every area, groups and direct messages, calls, your mail and your agents in one place. Part of Eigen Office.',
       tagline: 'Conversations that matter.',
       line: 'Channels for every area, groups, direct messages and calls, your mail right beside them. Call an agent in with @ and it answers in the conversation; the AI sums up what you missed.',
       principles: [
@@ -162,7 +162,7 @@ const en = {
     cloud: {
       metaTitle: 'Cloud | Files everyone finds again',
       metaDescription:
-        'Cloud is the shared memory of your office. Every file knows its people and its history, and answers when you ask. Part of The Office.',
+        'Cloud is the shared memory of your office. Every file knows its people and its history, and answers when you ask. Part of Eigen Office.',
       tagline: 'Files everyone finds again.',
       line: 'The shared memory of your office. Every file knows its people and its history, and answers when you ask.',
       principles: [
@@ -279,9 +279,9 @@ const de: Suite = {
   },
   kinds: { slider: 'Präsentationen', writer: 'Dokumente', solver: 'Zahlen', reader: 'Formulare', sender: 'Nachrichten', cloud: 'Dateien' },
   office: {
-    metaTitle: 'The Office | Präsentationen, Dokumente, Zahlen, Formulare, Gespräche und Dateien an einem Ort',
+    metaTitle: 'Eigen Office | Präsentationen, Dokumente, Zahlen, Formulare, Gespräche und Dateien an einem Ort',
     metaDescription:
-      'The Office sind sechs Apps, die wie eine arbeiten: Slider für Präsentationen, Writer für Dokumente, Solver für Zahlen, Reader für Formulare, Sender für Gespräche und Cloud für Dateien. Ein Konto, eine KI, ein Plan. Slider, Reader, Sender und Cloud gibt es schon.',
+      'Eigen Office sind sechs Apps, die wie eine arbeiten: Slider für Präsentationen, Writer für Dokumente, Solver für Zahlen, Reader für Formulare, Sender für Gespräche und Cloud für Dateien. Ein Konto, eine KI, ein Plan. Slider, Reader, Sender und Cloud gibt es schon.',
     title: ['Präsentieren. Schreiben.', 'Rechnen. Teilen.'],
     sub: 'Das KI-native Office für Open Document. Präsentationen, Dokumente, Zahlen und Dateien, an denen dein Team und die KI gemeinsam arbeiten.',
     cta: 'Slider öffnen',
@@ -335,7 +335,7 @@ const de: Suite = {
     writer: {
       metaTitle: 'Writer | Dokumente, die ihr zusammen schreibt',
       metaDescription:
-        'Writer ist die ruhige Seite, auf der dein Team und die KI zusammen schreiben. Was du siehst, wird gedruckt. Teil von The Office, kommt bald.',
+        'Writer ist die ruhige Seite, auf der dein Team und die KI zusammen schreiben. Was du siehst, wird gedruckt. Teil von Eigen Office, kommt bald.',
       tagline: 'Dokumente, die ihr zusammen schreibt.',
       line: 'Eine ruhige Seite, auf der dein Team und die KI zusammen schreiben. Was du siehst, wird gedruckt.',
       principles: [
@@ -356,7 +356,7 @@ const de: Suite = {
     solver: {
       metaTitle: 'Solver | Zahlen, die sich selbst erklären',
       metaDescription:
-        'Solver hält jede Zahl einmal, in echten Tabellen. Frag in normalen Worten, bau Dashboards und verfolge jede Zahl bis zu ihrer Zeile zurück. Teil von The Office, kommt bald.',
+        'Solver hält jede Zahl einmal, in echten Tabellen. Frag in normalen Worten, bau Dashboards und verfolge jede Zahl bis zu ihrer Zeile zurück. Teil von Eigen Office, kommt bald.',
       tagline: 'Zahlen, die sich selbst erklären.',
       line: 'Deine Zahlen liegen einmal vor, in echten Tabellen. Frag in normalen Worten und verfolge jede Zahl bis zu ihrer Zeile zurück.',
       principles: [
@@ -377,7 +377,7 @@ const de: Suite = {
     reader: {
       metaTitle: 'Reader | Formulare, die ihr zusammen ausfüllt',
       metaDescription:
-        'Reader öffnet die Dateien, die du bekommst. Füll sie aus, unterschreib sie und besprich sie direkt auf der Seite mit deinem Team und der KI. Teil von The Office.',
+        'Reader öffnet die Dateien, die du bekommst. Füll sie aus, unterschreib sie und besprich sie direkt auf der Seite mit deinem Team und der KI. Teil von Eigen Office.',
       tagline: 'Formulare, die ihr zusammen ausfüllt.',
       line: 'Öffne die Datei, die du bekommen hast, füll sie aus, unterschreib sie und besprich sie direkt auf der Seite. Die KI antwortet aus ihrem Inhalt und füllt das Formular aus.',
       principles: [
@@ -398,7 +398,7 @@ const de: Suite = {
     sender: {
       metaTitle: 'Sender | Gespräche, die zählen',
       metaDescription:
-        'Sender ist der Ort, an dem dein Team spricht: ein Kanal für jeden Bereich, Gruppen und Direktnachrichten, Anrufe, deine Post und deine Agenten an einem Ort. Teil von The Office.',
+        'Sender ist der Ort, an dem dein Team spricht: ein Kanal für jeden Bereich, Gruppen und Direktnachrichten, Anrufe, deine Post und deine Agenten an einem Ort. Teil von Eigen Office.',
       tagline: 'Gespräche, die zählen.',
       line: 'Kanäle für jeden Bereich, Gruppen, Direktnachrichten und Anrufe, deine Post gleich daneben. Ruf mit @ einen Agenten dazu, und er antwortet im Gespräch; die KI fasst zusammen, was du verpasst hast.',
       principles: [
@@ -419,7 +419,7 @@ const de: Suite = {
     cloud: {
       metaTitle: 'Cloud | Dateien, die jeder wiederfindet',
       metaDescription:
-        'Cloud ist das gemeinsame Gedächtnis deines Office. Jede Datei kennt ihre Leute und ihren Verlauf und antwortet, wenn du fragst. Teil von The Office.',
+        'Cloud ist das gemeinsame Gedächtnis deines Office. Jede Datei kennt ihre Leute und ihren Verlauf und antwortet, wenn du fragst. Teil von Eigen Office.',
       tagline: 'Dateien, die jeder wiederfindet.',
       line: 'Das gemeinsame Gedächtnis deines Office. Jede Datei kennt ihre Leute und ihren Verlauf und antwortet, wenn du fragst.',
       principles: [
@@ -532,9 +532,9 @@ const fr: Suite = {
   },
   kinds: { slider: 'Présentations', writer: 'Documents', solver: 'Chiffres', reader: 'Formulaires', sender: 'Messages', cloud: 'Fichiers' },
   office: {
-    metaTitle: 'The Office | Présentations, documents, chiffres, formulaires, conversations et fichiers au même endroit',
+    metaTitle: 'Eigen Office | Présentations, documents, chiffres, formulaires, conversations et fichiers au même endroit',
     metaDescription:
-      'The Office, ce sont six apps qui travaillent comme une seule : Slider pour les présentations, Writer pour les documents, Solver pour les chiffres, Reader pour les formulaires, Sender pour les conversations et Cloud pour les fichiers. Un compte, une IA, une offre. Slider, Reader, Sender et Cloud sont déjà disponibles.',
+      'Eigen Office, ce sont six apps qui travaillent comme une seule : Slider pour les présentations, Writer pour les documents, Solver pour les chiffres, Reader pour les formulaires, Sender pour les conversations et Cloud pour les fichiers. Un compte, une IA, une offre. Slider, Reader, Sender et Cloud sont déjà disponibles.',
     title: ['Présenter. Écrire.', 'Calculer. Partager.'],
     sub: 'L’office natif IA pour Open Document. Présentations, documents, chiffres et fichiers sur lesquels votre équipe et l’IA travaillent ensemble.',
     cta: 'Ouvrir Slider',
@@ -585,7 +585,7 @@ const fr: Suite = {
     writer: {
       metaTitle: 'Writer | Des documents écrits ensemble',
       metaDescription:
-        'Writer est la page calme où votre équipe et l’IA écrivent ensemble. Ce que vous voyez est ce qui s’imprime. Fait partie de The Office, bientôt disponible.',
+        'Writer est la page calme où votre équipe et l’IA écrivent ensemble. Ce que vous voyez est ce qui s’imprime. Fait partie de Eigen Office, bientôt disponible.',
       tagline: 'Des documents écrits ensemble.',
       line: 'Une page calme où votre équipe et l’IA écrivent ensemble. Ce que vous voyez est ce qui s’imprime.',
       principles: [
@@ -606,7 +606,7 @@ const fr: Suite = {
     solver: {
       metaTitle: 'Solver | Des chiffres qui s’expliquent',
       metaDescription:
-        'Solver garde chaque chiffre une seule fois, dans de vraies tables. Posez vos questions avec vos mots, créez des tableaux de bord et remontez chaque chiffre jusqu’à sa ligne. Fait partie de The Office, bientôt disponible.',
+        'Solver garde chaque chiffre une seule fois, dans de vraies tables. Posez vos questions avec vos mots, créez des tableaux de bord et remontez chaque chiffre jusqu’à sa ligne. Fait partie de Eigen Office, bientôt disponible.',
       tagline: 'Des chiffres qui s’expliquent.',
       line: 'Vos chiffres existent une seule fois, dans de vraies tables. Posez vos questions avec vos mots et remontez chaque chiffre jusqu’à sa ligne.',
       principles: [
@@ -627,7 +627,7 @@ const fr: Suite = {
     reader: {
       metaTitle: 'Reader | Des formulaires remplis et signés ensemble',
       metaDescription:
-        'Reader ouvre les fichiers que vous recevez. Remplissez-les, signez-les et discutez-en directement sur la page avec votre équipe et l’IA. Fait partie de The Office.',
+        'Reader ouvre les fichiers que vous recevez. Remplissez-les, signez-les et discutez-en directement sur la page avec votre équipe et l’IA. Fait partie de Eigen Office.',
       tagline: 'Des formulaires remplis et signés ensemble.',
       line: 'Ouvrez le fichier reçu, remplissez-le, signez-le et discutez-en directement sur la page. L’IA répond à partir de son contenu et remplit le formulaire.',
       principles: [
@@ -648,7 +648,7 @@ const fr: Suite = {
     sender: {
       metaTitle: 'Sender | Des conversations qui comptent',
       metaDescription:
-        'Sender est l’endroit où votre équipe se parle : un canal pour chaque espace, des groupes et des messages directs, des appels, vos mails et vos agents au même endroit. Fait partie de The Office.',
+        'Sender est l’endroit où votre équipe se parle : un canal pour chaque espace, des groupes et des messages directs, des appels, vos mails et vos agents au même endroit. Fait partie de Eigen Office.',
       tagline: 'Des conversations qui comptent.',
       line: 'Des canaux pour chaque espace, des groupes, des messages directs et des appels, vos mails juste à côté. Appelez un agent avec @ et il répond dans la conversation ; l’IA résume ce que vous avez manqué.',
       principles: [
@@ -669,7 +669,7 @@ const fr: Suite = {
     cloud: {
       metaTitle: 'Cloud | Des fichiers que chacun retrouve',
       metaDescription:
-        'Cloud est la mémoire commune de votre office. Chaque fichier connaît ses personnes et son historique, et répond quand vous demandez. Fait partie de The Office.',
+        'Cloud est la mémoire commune de votre office. Chaque fichier connaît ses personnes et son historique, et répond quand vous demandez. Fait partie de Eigen Office.',
       tagline: 'Des fichiers que chacun retrouve.',
       line: 'La mémoire commune de votre office. Chaque fichier connaît ses personnes et son historique, et répond quand vous demandez.',
       principles: [

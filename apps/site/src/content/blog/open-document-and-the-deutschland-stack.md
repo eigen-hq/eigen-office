@@ -76,6 +76,6 @@ Schleswig-Holstein made ODF its standard format in 2024 and had about [80 percen
 4. **Embed fonts or use free ones.** Most layout differences between programs are missing fonts.
 5. **Send PDF/UA when nothing should change.** ODF is for work in progress.
 
-## Where The Office stands
+## Where Eigen Office stands
 
-The Office is built on ODF from the first file. Slider edits a real ODP, not an internal format that is exported at the end. What you download is the file itself, readable in LibreOffice and any other program that follows the standard.
+Eigen Office is built on ODF from the first file. Slider edits a real ODP, not an internal format that is exported at the end. What you download is the file itself, readable in LibreOffice and any other program that follows the standard.

@@ -4,9 +4,9 @@
  * A chapter's title ends in `mark`, the phrase the page selects like a shape in the editor.
  */
 const en = {
-  metaTitle: 'Vision | The Office',
+  metaTitle: 'Vision | Eigen Office',
   metaDescription:
-    'Accelerate social progress, build a slower future: why The Office exists and why people and the AI work on the same thing.',
+    'Accelerate social progress, build a slower future: why Eigen Office exists and why people and the AI work on the same thing.',
   eyebrow: 'Our mission',
   title: ['Accelerate social progress.', 'Build a slower future.'],
   sub: 'It sounds like a contradiction. It is the plan: the faster good ideas travel, the sooner we arrive at a world with more time for each other. This is the thread the office follows.',
@@ -86,7 +86,7 @@ const en = {
     mark: 'its own agent.',
     body: 'Other tools bolt a chat to the side and call it AI. Here, AI lives where the feedback is: every thread can become an agent that joins the team like another colleague. AI does the work, people bring their opinion. The slower future, in miniature.',
     elsewhere: ['Elsewhere', 'A chat bolted to the side'],
-    here: ['The Office', 'Every thread is its own agent'],
+    here: ['Eigen Office', 'Every thread is its own agent'],
   },
   short: {
     label: 'Long story short',
@@ -105,9 +105,9 @@ const en = {
 export type Vision = typeof en;
 
 const de: Vision = {
-  metaTitle: 'Vision | The Office',
+  metaTitle: 'Vision | Eigen Office',
   metaDescription:
-    'Gesellschaftlichen Fortschritt beschleunigen, eine langsamere Zukunft bauen: warum es The Office gibt und warum Menschen und KI an derselben Sache arbeiten.',
+    'Gesellschaftlichen Fortschritt beschleunigen, eine langsamere Zukunft bauen: warum es Eigen Office gibt und warum Menschen und KI an derselben Sache arbeiten.',
   eyebrow: 'Unsere Mission',
   title: ['Fortschritt beschleunigen.', 'Eine langsamere Zukunft bauen.'],
   sub: 'Es klingt wie ein Widerspruch. Es ist der Plan: Je schneller gute Ideen ankommen, desto eher leben wir in einer Welt mit mehr Zeit füreinander. Diesem Faden folgt das Office.',
@@ -186,7 +186,7 @@ const de: Vision = {
     mark: 'eigener Agent.',
     body: 'Andere Werkzeuge schrauben einen Chat an die Seite und nennen das KI. Hier lebt die KI dort, wo das Feedback ist: Jeder Thread kann zu einem Agenten werden, der wie eine weitere Kollegin ins Team kommt. Die KI macht die Arbeit, Menschen bringen ihre Meinung ein. Die langsamere Zukunft im Kleinen.',
     elsewhere: ['Anderswo', 'Ein Chat, an die Seite geschraubt'],
-    here: ['The Office', 'Jeder Thread ist ein eigener Agent'],
+    here: ['Eigen Office', 'Jeder Thread ist ein eigener Agent'],
   },
   short: {
     label: 'Kurz gesagt',
@@ -207,9 +207,9 @@ const de: Vision = {
 };
 
 const fr: Vision = {
-  metaTitle: 'Vision | The Office',
+  metaTitle: 'Vision | Eigen Office',
   metaDescription:
-    'Accélérer le progrès social, construire un avenir plus lent : pourquoi The Office existe et pourquoi les personnes et l’IA travaillent sur la même chose.',
+    'Accélérer le progrès social, construire un avenir plus lent : pourquoi Eigen Office existe et pourquoi les personnes et l’IA travaillent sur la même chose.',
   eyebrow: 'Notre mission',
   title: ['Accélérer le progrès social.', 'Construire un avenir plus lent.'],
   sub: 'Cela ressemble à une contradiction. C’est le plan : plus les bonnes idées circulent vite, plus tôt nous arrivons dans un monde avec plus de temps les uns pour les autres. C’est le fil que suit l’office.',
@@ -288,7 +288,7 @@ const fr: Vision = {
     mark: 'son propre agent.',
     body: 'D’autres outils vissent un chat sur le côté et appellent cela de l’IA. Ici, l’IA vit là où se trouvent les retours : chaque fil peut devenir un agent qui rejoint l’équipe comme une collègue de plus. L’IA fait le travail, les personnes apportent leur avis. L’avenir plus lent, en miniature.',
     elsewhere: ['Ailleurs', 'Un chat vissé sur le côté'],
-    here: ['The Office', 'Chaque fil est son propre agent'],
+    here: ['Eigen Office', 'Chaque fil est son propre agent'],
   },
   short: {
     label: 'En bref',

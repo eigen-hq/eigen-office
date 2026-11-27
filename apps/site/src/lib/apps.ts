@@ -9,7 +9,7 @@ export type AppId = 'office' | ProductId;
 export const APPS: readonly AppId[] = ['office', ...PRODUCTS];
 
 export const APP_NAMES: Record<AppId, string> = {
-  office: 'Office',
+  office: 'Eigen Office',
   slider: 'Slider',
   writer: 'Writer',
   solver: 'Solver',
