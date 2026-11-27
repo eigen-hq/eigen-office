@@ -49,7 +49,8 @@ fun serverOf(text: String): String {
   }
   val local = host in setOf("localhost", "127.0.0.1", "::1")
   if (scheme != "https" && !local) throw SignInError("Der Server braucht https.")
-  return "$scheme://$host${if (url.port != -1) ":${url.port}" else ""}"
+  // Lower case: the web view's origins are, `isOwn` compares them as they are.
+  return "$scheme://${host.lowercase()}${if (url.port != -1) ":${url.port}" else ""}"
 }
 
 private fun base64url(bytes: ByteArray) =

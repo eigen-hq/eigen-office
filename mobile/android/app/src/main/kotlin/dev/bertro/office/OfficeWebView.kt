@@ -28,6 +28,7 @@ import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -157,7 +158,8 @@ class OfficeWebView(
   private fun answer(message: WebMessageCompat, reply: JavaScriptReplyProxy) {
     val body = runCatching { JSONObject(message.data ?: "") }.getOrNull() ?: return
     body.optJSONObject("save")?.let {
-      save(it)
+      // Decoding and writing a big file off the main thread (no „App antwortet nicht“).
+      scope.launch(Dispatchers.IO) { save(it) }
       return
     }
     val id = body.optInt("id")
@@ -249,7 +251,9 @@ class OfficeWebView(
           }
         }
       val missing = needed.filter { activity.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-      if (missing.isEmpty()) return request.grant(request.resources)
+      if (missing.isEmpty()) return grantMedia(request)
+      // One question at a time: an older one still open is turned down, not left hanging.
+      mediaAsk?.deny()
       mediaAsk = request
       activity.requestPermissions(missing.toTypedArray(), ASK_MEDIA)
     }
@@ -266,10 +270,17 @@ class OfficeWebView(
     val asked = mediaAsk ?: return
     mediaAsk = null
     if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) {
-      asked.grant(asked.resources)
+      grantMedia(asked)
     } else {
       asked.deny()
     }
+  }
+
+  /** Camera and microphone only – whatever else a page asks for stays off. */
+  private fun grantMedia(request: PermissionRequest) {
+    val media = setOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE, PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+    val granted = request.resources.filter { it in media }.toTypedArray()
+    if (granted.isEmpty()) request.deny() else request.grant(granted)
   }
 
   // MARK: Downloads – into Downloads, as the browser does
