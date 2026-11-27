@@ -36,7 +36,8 @@ func serverOf(_ text: String) throws -> String {
   }
   let local = ["localhost", "127.0.0.1", "::1"].contains(host)
   if scheme != "https" && !local { throw SignInError.message("Der Server braucht https.") }
-  return "\(scheme)://\(host)\(url.port.map { ":\($0)" } ?? "")"
+  // Lower case: the web view's origins are, `isOwn` compares them as they are.
+  return "\(scheme.lowercased())://\(host.lowercased())\(url.port.map { ":\($0)" } ?? "")"
 }
 
 private func base64url(_ data: Data) -> String {

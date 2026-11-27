@@ -170,11 +170,18 @@ struct OfficeWebView: UIViewRepresentable {
         return .allow
       }
       // Other sites, mail and phone links: Safari or their app (as the desktop's browser).
-      if action.targetFrame?.isMainFrame ?? true, ["https", "http", "mailto", "tel"].contains(url.scheme ?? "") {
+      if action.targetFrame?.isMainFrame ?? true, Self.leaves(url) {
         await UIApplication.shared.open(url)
         return .cancel
       }
-      return action.targetFrame?.isMainFrame == false ? .allow : .cancel
+      // A frame in a page (a video, a map) loads the web, never another app's link.
+      let web = ["https", "http", "about", "blob", "data"].contains(url.scheme?.lowercased() ?? "")
+      return action.targetFrame?.isMainFrame == false && web ? .allow : .cancel
+    }
+
+    /// What may leave the app: web pages, mail and phone – no other app's deep link.
+    private static func leaves(_ url: URL) -> Bool {
+      ["https", "http", "mailto", "tel"].contains(url.scheme?.lowercased() ?? "")
     }
 
     func webView(
@@ -194,7 +201,7 @@ struct OfficeWebView: UIViewRepresentable {
       for action: WKNavigationAction, windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
       if let url = action.request.url {
-        if isOwn(url) { webView.load(action.request) } else { UIApplication.shared.open(url) }
+        if isOwn(url) { webView.load(action.request) } else if Self.leaves(url) { UIApplication.shared.open(url) }
       }
       return nil
     }
@@ -203,7 +210,11 @@ struct OfficeWebView: UIViewRepresentable {
       _ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin,
       initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType
     ) async -> WKPermissionDecision {
-      origin.protocol == self.origin.scheme && origin.host == self.origin.host ? .grant : .deny
+      // The office's own page only – its main frame, same scheme, host and port (0: the default).
+      let own =
+        origin.protocol == self.origin.scheme && origin.host == self.origin.host
+        && origin.port == (self.origin.port ?? 0)
+      return own && frame.isMainFrame && isOwn(frame.request.url) ? .grant : .deny
     }
 
     #if DEBUG
