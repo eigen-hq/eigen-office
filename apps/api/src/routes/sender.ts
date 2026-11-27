@@ -61,7 +61,7 @@ import {
 } from '../services/sender-scheduled';
 import { readTriage, senderTriage } from '../services/sender-triage';
 import { pinSender } from '../services/sender-pins';
-import { linkPreview, linkPreviewImage } from '../services/link-previews';
+import { linkPreview, linkPreviewIcon, linkPreviewImage } from '../services/link-previews';
 import { subscribePush, unsubscribePush, vapidOf } from '../services/web-push';
 
 const HEARTBEAT_MS = 25_000;
@@ -107,7 +107,7 @@ export function senderRoutes(deps: AppDeps) {
       .get('/workspaces/:id/sender', viewer, async (c) =>
         c.json(await senderHome(deps, me(c).id, c.req.param('id'))),
       )
-      /** A link's card under a message (`services/link-previews`): the page's title and picture. */
+      /** A link's card or chip in written text (`services/link-previews`): the page's title and picture. */
       .get('/workspaces/:id/link-preview', viewer, async (c) => {
         const userId = me(c).id;
         let limited = false;
@@ -138,6 +138,19 @@ export function senderRoutes(deps: AppDeps) {
         c.header('Cache-Control', 'private, max-age=86400');
         c.header('X-Content-Type-Options', 'nosniff');
         return c.body(image as Uint8Array<ArrayBuffer>);
+      })
+      .get('/workspaces/:id/link-preview/icon', viewer, async (c) => {
+        const icon = await linkPreviewIcon(
+          deps,
+          me(c).id,
+          c.req.param('id'),
+          c.req.query('url') ?? '',
+        );
+        if (!icon) throw notFound('Davon gibt es kein Symbol.');
+        c.header('Content-Type', 'image/png');
+        c.header('Cache-Control', 'private, max-age=86400');
+        c.header('X-Content-Type-Options', 'nosniff');
+        return c.body(icon as Uint8Array<ArrayBuffer>);
       })
       /** The side bar's search: messages with these words in every conversation the caller sees. */
       .get('/workspaces/:id/sender/search', viewer, async (c) =>

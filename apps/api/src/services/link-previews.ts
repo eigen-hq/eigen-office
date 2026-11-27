@@ -4,12 +4,14 @@ import type { LinkPreview } from '@slider/shared';
 import type { AppDeps } from '../deps';
 import { loadImage } from '../import/load-image';
 import { dnsLookup, readBodyCapped, safeFetch, type FetchLike } from '../sources/safe-fetch';
+import { pageIcons, safeSvg } from './mail-logos';
 import { DAY_MS } from './retention-rules';
 import { requireRole } from './workspaces/roles';
 
 /*
- * A link's card under a message in Sender: the page's own title, description, site name and
- * picture (`og:` / `twitter:` tags, else `<title>` and its description). Read by Slider's server
+ * A link's card or chip wherever people write (Sender, pages, comments, notes): the page's own
+ * title, description, site name, picture (`og:` / `twitter:` tags, else `<title>` and its
+ * description) and its site's icon (what its head names, else `/favicon.ico`). Read by Slider's server
  * with the address alone – no cookie, no name, never from the browser – every hop through
  * `safeFetch` (https, public addresses, capped); only the start of the page is read, the picture
  * is drawn anew as a JPEG (never handed on as it came). Kept by address in the blob store for
@@ -34,6 +36,13 @@ const WIDE_MIN_RATIO = 1.4;
 const LOOKUP_TIMEOUT_MS = 10_000;
 const MAX_TITLE = 200;
 const MAX_DESCRIPTION = 300;
+const MAX_ICON_BYTES = 256 * 1024;
+/** The icon's side: sharp at 16–20 px on a 3× screen. */
+const ICON_PX = 64;
+/** A site icon smaller than this is no icon (a tracking pixel). */
+const MIN_ICON_PX = 16;
+/** Icons a page names that are tried before `/favicon.ico`. */
+const MAX_ICON_TRIES = 2;
 
 const PREFIX = 'link-previews/';
 const keyOf = (url: string) => `${PREFIX}${createHash('sha256').update(url).digest('base64url')}`;
@@ -96,6 +105,7 @@ export async function linkPreview(
     const entry: Kept = { at: deps.clock.now().getTime(), preview: found };
     await deps.storage.put(`${key}.json`, new TextEncoder().encode(JSON.stringify(entry)));
     if (!found?.image) await deps.storage.delete(`${key}.jpg`).catch(() => undefined);
+    if (!found?.icon) await deps.storage.delete(`${key}.icon.png`).catch(() => undefined);
     return found;
   })().finally(() => running.delete(key));
   running.set(key, run);
@@ -114,7 +124,19 @@ export async function linkPreviewImage(
   return deps.storage.get(`${keyOf(raw.trim())}.jpg`);
 }
 
-/** Drops what was looked up more than {@link KEEP_DAYS} ago, with its picture. */
+/** The site icon of an address's card (a PNG), as kept with it; `null` when it has none. */
+export async function linkPreviewIcon(
+  deps: AppDeps,
+  userId: string,
+  workspaceId: string,
+  raw: string,
+): Promise<Uint8Array | null> {
+  await requireRole(deps.db, workspaceId, userId);
+  if (!previewableUrl(deps, raw)) return null;
+  return deps.storage.get(`${keyOf(raw.trim())}.icon.png`);
+}
+
+/** Drops what was looked up more than {@link KEEP_DAYS} ago, with its picture and icon. */
 export async function sweepLinkPreviews(deps: AppDeps): Promise<void> {
   const before = deps.clock.now().getTime() - KEEP_DAYS * DAY_MS;
   for (const key of await deps.storage.list(PREFIX)) {
@@ -124,6 +146,7 @@ export async function sweepLinkPreviews(deps: AppDeps): Promise<void> {
     if (kept && kept.at >= before) continue;
     await deps.storage.delete(key);
     await deps.storage.delete(`${base}.jpg`).catch(() => undefined);
+    await deps.storage.delete(`${base}.icon.png`).catch(() => undefined);
   }
 }
 
@@ -178,14 +201,19 @@ async function lookUp(
   const html = decode(await readStart(response, MAX_PAGE_BYTES), type);
   const page = readPage(html);
   if (!page.title) return null;
-  const picture = page.image ? await pictureOf(deps, page.image, final) : null;
+  const [picture, icon] = await Promise.all([
+    page.image ? pictureOf(deps, page.image, final) : null,
+    iconOf(deps, html, final),
+  ]);
   if (picture) await deps.storage.put(`${key}.jpg`, picture.bytes);
+  if (icon) await deps.storage.put(`${key}.icon.png`, icon);
   return {
     url: written,
     title: page.title,
     description: page.description,
     site: page.site ?? final.hostname.replace(/^www\./, ''),
     image: picture?.shape ?? null,
+    icon: !!icon,
   };
 }
 
@@ -331,6 +359,54 @@ export function readPage(html: string): {
         2000,
       ) ?? null,
   };
+}
+
+/**
+ * The site's icon beside a link: the largest the page's head names (touch icons first), else
+ * `/favicon.ico`; drawn anew as an {@link ICON_PX} PNG keeping its clear parts clear (an SVG only
+ * once {@link safeSvg} found nothing in it that runs or loads). `null`: none could be read.
+ */
+async function iconOf(deps: AppDeps, html: string, base: URL): Promise<Uint8Array | null> {
+  const tries = [
+    ...pageIcons(html, base).slice(0, MAX_ICON_TRIES),
+    new URL('/favicon.ico', base),
+  ].filter((url, index, all) => all.findIndex((other) => other.href === url.href) === index);
+  for (const url of tries) {
+    try {
+      const { response } = await safeFetch(
+        url,
+        { ...network(deps), maxBytes: MAX_ICON_BYTES },
+        { headers: { Accept: 'image/*', 'User-Agent': 'Slider (link previews)' } },
+      );
+      const type = (response.headers.get('content-type') ?? '').toLowerCase();
+      if (!response.ok || type.startsWith('text/html')) {
+        await response.body?.cancel();
+        continue;
+      }
+      let bytes = await readBodyCapped(response, MAX_ICON_BYTES);
+      if (
+        type.includes('svg') ||
+        /^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(new TextDecoder().decode(bytes.subarray(0, 512)))
+      ) {
+        const svg = safeSvg(new TextDecoder().decode(bytes));
+        if (!svg) continue;
+        bytes = new TextEncoder().encode(svg);
+      }
+      const image = await loadImage(bytes, MAX_IMAGE_PIXELS);
+      if (image.width < MIN_ICON_PX || image.height < MIN_ICON_PX) continue;
+      const canvas = createCanvas(ICON_PX, ICON_PX);
+      const scale = Math.min(ICON_PX / image.width, ICON_PX / image.height);
+      const width = image.width * scale;
+      const height = image.height * scale;
+      canvas
+        .getContext('2d')
+        .drawImage(image, (ICON_PX - width) / 2, (ICON_PX - height) / 2, width, height);
+      return new Uint8Array(await canvas.encode('png'));
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 /**

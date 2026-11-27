@@ -2956,8 +2956,11 @@ describe('Sender – the workspace’s messages', () => {
         new Response(shotPng, { headers: { 'content-type': 'image/png' } }),
       'https://nur-titel.example/': htmlPage('<title> Nur ein Titel </title>'),
       'https://firma.example/': htmlPage(
-        '<title>Firma</title><meta name="twitter:image" content="https://firma.example/logo.png">',
+        '<title>Firma</title><meta name="twitter:image" content="https://firma.example/logo.png">' +
+          '<link rel="icon" href="/fav.png">',
       ),
+      'https://firma.example/fav.png': () =>
+        new Response(logoPng, { headers: { 'content-type': 'image/png' } }),
       'https://firma.example/logo.png': () =>
         new Response(logoPng, { headers: { 'content-type': 'image/png' } }),
     };
@@ -2982,6 +2985,7 @@ describe('Sender – the workspace’s messages', () => {
       description: 'Was sich ändert.',
       site: 'Beispiel News',
       image: 'wide',
+      icon: false,
     });
     const linkShot = await card('https://news.example/artikel?id=7', '/image');
     expect([linkShot.status, linkShot.headers.get('content-type')]).toEqual([200, 'image/jpeg']);
@@ -2992,7 +2996,14 @@ describe('Sender – the workspace’s messages', () => {
       image: null,
     });
     // A square or small picture (a logo) stands beside the words, not stretched over them.
-    expect(await ok<LinkPreview>(card('https://firma.example/'))).toMatchObject({ image: 'small' });
+    // The site's icon, from what its head names (else `/favicon.ico`), drawn anew as a PNG.
+    expect(await ok<LinkPreview>(card('https://firma.example/'))).toMatchObject({
+      image: 'small',
+      icon: true,
+    });
+    const linkIcon = await card('https://firma.example/', '/icon');
+    expect([linkIcon.status, linkIcon.headers.get('content-type')]).toEqual([200, 'image/png']);
+    expect((await card('https://nur-titel.example/', '/icon')).status).toBe(404);
     expect((await card('https://nur-titel.example/', '/image')).status).toBe(404);
     expect((await card('https://news.example/artikel?id=7')).status).toBe(200);
     for (const refused of [
@@ -3002,12 +3013,15 @@ describe('Sender – the workspace’s messages', () => {
     ]) {
       expect((await card(refused)).status).toBe(204);
     }
-    expect(linkFetched).toEqual([
+    expect(linkFetched.toSorted()).toEqual([
+      'https://firma.example/',
+      'https://firma.example/fav.png',
+      'https://firma.example/logo.png',
       'https://news.example/artikel?id=7',
       'https://news.example/bild.png',
+      'https://news.example/favicon.ico',
       'https://nur-titel.example/',
-      'https://firma.example/',
-      'https://firma.example/logo.png',
+      'https://nur-titel.example/favicon.ico',
     ]);
     // None found is kept a day, a logo seven.
     (ctx.deps.clock as TestClock).advance(2 * 86_400_000);

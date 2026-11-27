@@ -584,7 +584,7 @@ export interface SenderDraft {
 }
 
 /**
- * A web address's card under a message (`services/link-previews.ts`): what the page says of
+ * A web address's card or chip in written text (`services/link-previews.ts`): what the page says of
  * itself (its `og:` tags, else its title), read by Slider's server. `image`: a picture of it is
  * kept ({@link linkPreviewPaths}`.image`).
  */
@@ -600,12 +600,16 @@ export interface LinkPreview {
    * beside its words (a logo, an avatar – square or small pictures blur stretched as a banner).
    */
   image: 'wide' | 'small' | null;
+  /** The site's icon is kept ({@link linkPreviewPaths}`.icon`, a PNG); absent in older cards. */
+  icon?: boolean;
 }
 
-/** Where a link's card and its picture are asked for (under `API_PREFIX`). */
+/** Where a link's card, its picture and its site's icon are asked for (under `API_PREFIX`). */
 export const linkPreviewPaths = {
   of: (workspaceId: string, url: string) =>
     `/workspaces/${workspaceId}/link-preview?url=${encodeURIComponent(url)}`,
   image: (workspaceId: string, url: string) =>
     `/workspaces/${workspaceId}/link-preview/image?url=${encodeURIComponent(url)}`,
+  icon: (workspaceId: string, url: string) =>
+    `/workspaces/${workspaceId}/link-preview/icon?url=${encodeURIComponent(url)}`,
 };
