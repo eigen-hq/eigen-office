@@ -1766,10 +1766,11 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
 - Handwriting read on the device only (`components/InkReader.tsx`, `lib/ink-read.ts`) – never
   sent to a server or an AI for it (the user's call): an installed app's own recognition first –
   it puts `window.sliderInk = { recognize(lines, languages) → Promise<string[]> }` on the page
-  (lines top down, each its strokes, each `{x, y}` points in the 1000-wide frame; the app reads
-  them with ML Kit Digital Ink or Apple's Vision; no such app exists yet) – else Chrome's
-  Handwriting Recognition API (`createHandwritingRecognizer`, a drawing per line, the page's
-  `lang`; documented for ChromeOS and English only, Android unverified). Neither: the drawing
+  (lines top down, each its strokes, each `{x, y}` points in the 1000-wide frame; the iPad app
+  `mobile/ios` reads them with Apple's Vision, see „Tablet app“; an Android app would need ML Kit
+  Digital Ink, not built) – else Chrome's Handwriting Recognition API (`createHandwritingRecognizer`,
+  a drawing per line, the page's `lang`; documented for ChromeOS and English only – Chrome and
+  WebView 145 on Android have none at all, tried on the emulator). Neither: the drawing
   stays unread, its palette has no „Als Text kopieren“/„In Text umwandeln“. Lines: pen strokes
   drawn freehand (no marker, no `shape`), a line those whose middles lie in its height
   (`inkLines`). Read 1 s after the pen rests, in Bearbeiten every drawing whose `text` mark is
@@ -3525,3 +3526,42 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   of the real `~/Library/Application Support/Slider`; `SLIDER_NO_INSTALLED_LIBRECLOUD=1` and
   `SLIDER_LIBRECLOUD_ANSWER=load|later` drive the LibreOffice question. Its key presses go
   through CDP, not the macOS menu – check ⌘C/⌘V/⌘Z by hand.
+
+## Tablet app (`mobile/ios`)
+
+- The iPad app „Eigen Office“ (`dev.bertro.office`): a SwiftUI shell around one `WKWebView` on the
+  server's own pages, as the thin desktop apps (Cloud, Sender) – no bundled web app, no offline.
+  `cd mobile/ios && xcodegen generate` makes `Office.xcodeproj` (not in git; `brew install
+  xcodegen`); no CocoaPods, no packages. On a device: open the project, pick a Team under Signing,
+  run – a free Apple ID's build lasts 7 days.
+- Signing in as the desktop apps (`Session.swift`): `/desktop-anmelden?app=tablet` in
+  `ASWebAuthenticationSession` (Safari's sign-ins, never the web view – Google refuses those), the
+  code back through `slider-tablet://auth` (`DESKTOP_SCHEMES.tablet`), traded with the PKCE
+  verifier for a token at `/api/auth/desktop/token`, set as the session cookie
+  (`__Host-slider_session` on https, `slider_session` on http, httpOnly, Lax) before the first
+  load; token in the keychain (this device only). The pages going to `/login` (their „Abmelden“,
+  a session over) sign the app out too – `/api/auth/desktop/logout`, cookie gone, start screen.
+- `OfficeWebView.swift`: other sites, `mailto:`, `tel:` go to Safari/their app; own `window.open`
+  loads in the view; camera and microphone only for the server's origin; downloads go to the
+  share sheet; `window.sliderInk` is a user script in the page world answering through
+  `WKScriptMessageHandlerWithReply`, main frame of the own origin only.
+- Handwriting (`InkReading.swift`): each line drawn as a picture (black on white, 160 px tall,
+  round caps), Apple's Vision (`VNRecognizeTextRequest`, accurate, `de` → `de-DE`), pieces joined
+  left to right – offline, built into iPadOS, nothing sent anywhere. Chosen over ML Kit: its iOS
+  pod has no arm64-simulator slice (cannot run in the simulator on Apple silicon), downloads its
+  model from Google and sends Google usage data (device, app id, languages, events; no opt-out
+  documented). Behind `HandwritingReader`, so another reader can take its place. Tried with
+  Hershey script strokes through the real path (renderer → Vision → bridge → JS): clean lines
+  read right; real Pencil writing is only tried on an iPad.
+- Trying it in the simulator (`Probe.swift`, DEBUG only, `SIMCTL_CHILD_…` env on `simctl
+  launch`): `OFFICE_SIGN_IN_TO=<server>` starts signing in, `OFFICE_NO_BROWSER` prints
+  `OFFICE_SIGN_IN <url>` instead of the sheet – post its `challenge` to `/api/auth/desktop/code`
+  (a dev-login scratch server answers without a cookie) and write
+  `slider-tablet://auth?code=…&state=…` to `OFFICE_CALLBACK_FILE` (the simulator asks before
+  opening a scheme, no test can tap); `OFFICE_INK_PROBE=<lines.json>` asks `window.sliderInk` once
+  the page loads (`OFFICE_INK […]`); `OFFICE_SIGN_OUT_PROBE` then goes to `/login`. Note a
+  dev-login server signs in every request from this machine – `OFFICE_COOKIES` shows the cookie
+  was set, the page alone proves nothing.
+- Needs the server's web app from after 1.6.18 (`app=tablet`, `window.sliderInk` reading) – the
+  hosted instance only once released. Not done: Pencil double-tap (eraser), turning Scribble off
+  over drawings, an icon, Android.
