@@ -7,6 +7,14 @@ import { APP_NAMES } from '@/lib/apps';
 import { Button, ErrorText, Icon, TextLink } from '@/ui';
 
 /**
+ * Any app may claim the app's scheme and open this page with its own challenge: the page says to go
+ * on only from one's own app (a verified https return would close it – App Links, associated
+ * domains).
+ */
+const ONLY_FROM_THE_APP =
+  'Bestätige nur, wenn du die Anmeldung gerade selbst in der App begonnen hast.';
+
+/**
  * `/desktop-anmelden?challenge=…&state=…` – „Anmelden“ in the desktop app opens it in the
  * browser (BER-201). Signed in (the account gate sees to that), one click hands the app a
  * one-time code through `slider://auth`; never on opening, so no page can sign an app in
@@ -92,13 +100,13 @@ export function Component() {
       <CenteredCard
         icon={<Icon name={tablet ? 'tabletMac' : 'desktopWindows'} size={28} />}
         title={add ? `Konto zur ${name}-App hinzufügen` : `In der ${name}-App anmelden`}
-        message={
+        message={`${
           me?.user
             ? add
               ? `Das Konto ${me.user.name} (${me.user.email}) kommt in der App zu deinen anderen dazu.`
               : `Die App auf deinem ${device} bekommt Zugriff auf das Konto ${me.user.name}.`
             : `Die App auf deinem ${device} bekommt Zugriff auf dein Konto.`
-        }
+        } ${ONLY_FROM_THE_APP}`}
       >
         <div className="flex w-full flex-col gap-3">
           <Button size="lg" glow loading={busy} className="w-full" onClick={() => void confirm()}>
