@@ -3265,7 +3265,10 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   from the path (`lib/view.ts` `viewOf`) plus the page's call-here lines (`ownCallHere`) – so the
   agent on the phone knows what the computer shows. The desk is „active“ with its tab in front and
   input in the last 2 min (`COMPANION_RECENT_MS`), „there“ for 60 min (`COMPANION_GONE_MS`).
-  The hub is in memory: one API process (a second one would split the tabs).
+  The hub is in memory: one API process (a second one would split the tabs). Bounded: reports
+  3000/h per user, 20 tabs per user (a new one takes the place of the oldest without its stream),
+  a report whose stream never came is dropped after 2 min unheard. „Nie“: tabs post `view: null`,
+  nothing of their page.
 - `lib/device.ts`: phone = coarse pointer and small (< 768 wide or < 500 high); tablet = coarse
   pointer, bigger, no `any-pointer: fine` → reports as phone (never the desk) and is only offered
   the companion (`CompanionButton`), never opened by itself; anything else is a desk.
@@ -3279,12 +3282,18 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   step `{type:'show', deckId, action: next|prev|black, from: slideId}` or `{type:'open', path}`);
   the hub hands it to the one desk tab the phone shows (`deskTab`), SSE `companion-command`; 404
   when no desk; 1200/h. `path` must be the app's own (`companionPathSchema`: starts with one `/`,
-  not `//` or `/\`) – checked on both sides; the desk ignores `open` while a show or call runs.
+  not `//` or `/\`) – checked on both sides. A desk with a show or call running reports `busy`:
+  `open` is refused there (409, the phone toasts why). 204 only means written into a stream that
+  may be dead unnoticed (up to a heartbeat), so the phone says „Am Computer geöffnet.“ only once
+  the desk's report shows that page (`openAtDesk`/`deskShows`, 5 s), else an error toast.
 - Slide show remote: `PresentationMode` and `PresenterView` call `useShowRemote` (`show-hooks.ts`):
-  publish `{deckId, slideId, ended, black, startedAt}` into `lib/companion.ts` (`setCompanionShow`),
+  publish `{deckId, slideId, ended, black, startedAt, slideIds}` (the list fixed at the show's
+  start) into `lib/companion.ts` (`setCompanionShow`),
   `report.ts` adds it to the deck's view and posts show changes without the settle delay. A step is
   applied only if `from` is the slide shown (idempotent, a double tap does not skip two). The phone
-  (`CompanionShow.tsx`) lists slides with `showSlidesOf` (same order/hidden/variants as the show),
+  (`CompanionShow.tsx`) lists the slides by `slideIds` (`showSlidesOf` only for a tab that sent
+  none), its stopwatch from the earliest `startedAt` heard (presenter view and audience window
+  each start their own),
   steps optimistically (forgotten after 2.5 s if the desk did not move), notes A−/A+ kept per
   browser (`slider.companion.notesSize`). A show ranks above „active“ and keeps the desk in use.
 - Touched, it holds still (`lib/hold.ts`): while the phone was touched in the last 20 s
@@ -3298,7 +3307,9 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
 - Setting `users.companion` (`auto` default | `ask` | `never`), on `/einstellungen` in its own
   section „Handy als Begleiter“ and by the agents' `change_settings`. `auto` opens it on the phone only when it lies there (seen, untouched
   20 s, no field focused, no call) and the computer is in use, not again after ✕ until the computer
-  was left (`lib/auto.ts` `opensByItself`). `ask` (and `auto` once left): `CompanionButton`, an icon
+  was left (`lib/auto.ts` `opensByItself`) – no desk heard counts as left only after 2 min (a
+  desk tab reloading sends `desk: null` for a moment). A broken stream forgets the desk after
+  15 s without reconnect (`companionStreamLost`). `ask` (and `auto` once left): `CompanionButton`, an icon
   left of the date in the header on a phone, green dot while the computer is in use – no pop-up.
 - Screen Wake Lock (`lib/wake-lock.ts`) only while the computer is there; re-taken on
   `visibilitychange` (browsers drop it when hidden). Needs https (localhost counts).
