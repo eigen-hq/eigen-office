@@ -36,6 +36,8 @@ export interface PageScreenProps {
   aside?: ReactNode;
   /** Opened to be written in at once (a page just made). */
   editing?: boolean;
+  /** An ask opened from the side bar's „Agenten“ (its arrival's key): in Bearbeiten again, its bar there. */
+  askedAt?: string | null;
 }
 
 export function PageScreen({
@@ -48,12 +50,18 @@ export function PageScreen({
   docTitle,
   aside,
   editing: startEditing = false,
+  askedAt = null,
 }: PageScreenProps) {
   const { workspace } = useCloud();
   const opened = useDocument(pageId);
   const rename = useRenameCloudNode(workspace.id);
   const host = useCloudPageHost({ ...place, selfId: pageId });
   const [editing, setEditing] = useState(startEditing);
+  const [shownAsk, setShownAsk] = useState(askedAt);
+  if (askedAt !== shownAsk) {
+    setShownAsk(askedAt);
+    if (askedAt) setEditing(true);
+  }
   const [sync, setSync] = useState<PageSyncState>('saved');
   const [named, setNamed] = useState<string | null>(null);
 

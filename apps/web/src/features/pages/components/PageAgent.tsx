@@ -27,20 +27,20 @@ export interface PageAgentProps {
 }
 
 export function PageAgent({ editor, sync, document: file, frame }: PageAgentProps) {
-  // Arrived from Notizen: read once, then taken out of the history (a reload asks nothing again).
+  // Arrived with an ask to show (the side bar's „Agenten“) – again on the page already open: kept
+  // with the arrival's key, then taken out of the history (a reload asks nothing again).
   const location = useLocation();
   const navigate = useNavigate();
-  const [arrival] = useState(
-    () =>
-      ((location.state as Record<string, unknown> | null)?.[PAGE_AGENT_STATE] as
-        PageAgentArrival | undefined) ?? null,
+  const fresh = (location.state as Record<string, unknown> | null)?.[PAGE_AGENT_STATE] as
+    PageAgentArrival | undefined;
+  const [arrival, setArrival] = useState<(PageAgentArrival & { key: string }) | null>(() =>
+    fresh ? { ...fresh, key: location.key } : null,
   );
-  const cleared = useRef(false);
+  if (fresh && arrival?.key !== location.key) setArrival({ ...fresh, key: location.key });
   useEffect(() => {
-    if (!arrival || cleared.current) return;
-    cleared.current = true;
+    if (!fresh) return;
     void navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
-  }, [arrival, location.pathname, location.search, navigate]);
+  }, [fresh, location.pathname, location.search, navigate]);
   const look = useMemo<DocumentVoiceLook>(
     () => ({
       sample: (pointer) => {
@@ -85,7 +85,7 @@ function Bar({
   document: file,
   frame,
   arrival,
-}: PageAgentProps & { arrival: PageAgentArrival | null }) {
+}: PageAgentProps & { arrival: (PageAgentArrival & { key: string }) | null }) {
   const host = usePageHost();
   // Inside `DocumentVoiceProvider`, always there.
   const voice = use(VoiceContext)!;
@@ -110,6 +110,7 @@ function Bar({
       placeholder="Sag der KI, was sich an der Seite ändern soll"
       notify={host.notify}
       asked={arrival?.asked ?? null}
+      askedAt={arrival?.key ?? null}
       frame={frame}
       flush={() => sync.current?.flush()}
       anchor={() => {

@@ -94,6 +94,8 @@ export interface AgentBarProps {
   onAsk?: (ask: { body: string; attachments: string[] }, commented: () => void) => Promise<void>;
   /** Asked before the page opened (a note made from Notizen): how it goes is shown. */
   asked?: string | null;
+  /** When it was asked to be shown: shown again each time this changes (the same page opened anew). */
+  askedAt?: string | null;
   /** The microphone's button and, while one speaks, the voice bar in the field's place. */
   voice?: { button: ReactNode; bar: ReactNode | null };
 }
@@ -110,6 +112,7 @@ export function AgentBar({
   onLeave,
   onAsk,
   asked: askedBefore = null,
+  askedAt = null,
   voice,
 }: AgentBarProps) {
   const queryClient = useQueryClient();
@@ -122,6 +125,11 @@ export function AgentBar({
   const [text, setText] = useState('');
   const [asking, setAsking] = useState(false);
   const [askedId, setAskedId] = useState<string | null>(askedBefore);
+  const [shownAt, setShownAt] = useState(askedAt);
+  if (askedAt !== shownAt) {
+    setShownAt(askedAt);
+    if (askedBefore) setAskedId(askedBefore);
+  }
   const [filming, setFilming] = useState(false);
   const filmRef = useRef<HTMLElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
