@@ -2531,10 +2531,14 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   Checked in a scratch e2e with real LibreOffice (PDF, DOCX, PPTX; dark, light, phone).
 - Link cards (`services/link-previews.ts`): not this instance's own host. `GET
   /workspaces/:ws/link-preview?url=` (204 = none), `/link-preview/image` and `/link-preview/icon`:
-  the server reads the page's head through `safeFetch` (≤ 512 KB, HTML only, 10 s for page +
-  picture, 200 lookups/h per person), `og:`/`twitter:` tags, else `<title>`; the picture redrawn
-  as JPEG ≤ 640 px (no SVG); the icon the largest of two its head names, else `/favicon.ico`,
-  drawn as a 64 px PNG (`icon: true`). Kept globally under `link-previews/<sha256>` (7 days
+  the server reads the page's head through `safeFetch` (≤ 512 KB, HTML only, 200 lookups/h per
+  person), `og:`/`twitter:` tags, else `<title>`; the picture redrawn as JPEG ≤ 640 px (no SVG);
+  the icon the largest of two its head names, else `/favicon.ico`, drawn as a 64 px PNG
+  (`icon: true`). Clocks apart: page 6 s (none then), picture and icon 4 s each (left out, the
+  words kept), both stored only after both – one 10 s for all lost the title to a hanging favicon.
+  What is drawn goes by its first bytes (`isRaster`: PNG/JPEG/GIF/WebP/ICO/BMP/AVIF), not its
+  content-type: no raster → an icon only through `safeSvg`, a picture never (an SVG with a leading
+  comment or called `.png` got past the old test). Kept globally under `link-previews/<sha256>` (7 days
   found, 1 none, swept after 30 by the retention job). Tests fake the web via `deps.linkPreviews`.
   In the privacy template (Sender).
 - One rule for web addresses in written text, everywhere (`lib/links`, 2026-11-27): a written
@@ -2547,11 +2551,18 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   shown text while not typing, a click beside a link makes it the field again). Asked only once
   on screen (`useSeen`), under the workspace of `LinkScope` (app root – `lib/` can't read
   features). Not for mail – received (a fetch could open one-time/unsubscribe links) or written
-  (the user's call 2026-11-27) – nor in Writer (own engine). Sender showed a card under every
+  (the user's call 2026-11-27) – nor in an event of a mail calendar (`calendar.mailAccountId`: its
+  notes are an organizer's invitation – RSVP, one-time links; `EventPanel` `previews`), nor in
+  Writer (own engine). Sender showed a card under every
   message with an address before; now the rule above.
 - Pages: `WebChipNode`/`WebCardNode` (`pages/lib/nodes.tsx`), Markdown in/out via
-  `WEB_CHIP_TRANSFORMER`/`WEB_CARD_TRANSFORMER`; a chip alone in its paragraph writes `<url>` (else
-  it would read back as a card). `units.ts`'s raw-HTML line test needs a tag name ending in space,
+  `WEB_CHIP_TRANSFORMER`/`WEB_CARD_TRANSFORMER`. `WEB_URL` lives in `nodes.tsx` (transformers import
+  nodes, not back): GFM's reading – no sentence punctuation at the end, a `)` only closing a `(` in
+  it (`…/wiki/Foo_(Bar)`); `loneUrl` in `lib/links` cards the same lines. A chip writes `<url>`
+  unless bare reads back as exactly it: not alone in its paragraph (would be a card), followed by
+  nothing or plain unformatted words with `url + words` matching just `url` (`x.de-Seite`, two
+  chips in a row, `**.**` → `<…>`); a card whose url is not `isBareWebUrl` writes `<url>` too.
+  ⌘V of an address over words is `$toggleLink`; in code it is letters (`$inCode`). `units.ts`'s raw-HTML line test needs a tag name ending in space,
   `/` or `>` (CommonMark), so `<https://…>` is no HTML block. Typing an address + space makes a
   chip, never a card (that would break writing); pasting one on an empty line makes the card
   (`web-links.ts`). `WebLinkBar` switches a picked one: „Link | Erwähnung | Karte“.
