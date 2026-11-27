@@ -8,7 +8,7 @@ android {
 
   defaultConfig {
     applicationId = "dev.bertro.office"
-    minSdk = 29
+    minSdk = 30
     targetSdk = 37
     versionCode = 1
     versionName = "0.1.0"

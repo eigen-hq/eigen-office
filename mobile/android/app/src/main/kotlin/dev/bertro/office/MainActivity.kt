@@ -1,5 +1,6 @@
 package dev.bertro.office
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.os.Build
@@ -159,6 +160,7 @@ class MainActivity : Activity() {
   }
 
   @Deprecated("Below Android 13 only; above, OnBackInvokedDispatcher.")
+  @SuppressLint("GestureBackNavigation")
   override fun onBackPressed() {
     back()
   }

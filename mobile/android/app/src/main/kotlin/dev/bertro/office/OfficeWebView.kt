@@ -297,10 +297,12 @@ class OfficeWebView(
   /** The server's `Content-Disposition` name (`filename*` first) – Android's own guess misses it. */
   private fun nameOf(disposition: String?): String? {
     if (disposition == null) return null
-    Regex("filename\\*=UTF-8''([^;]+)", RegexOption.IGNORE_CASE).find(disposition)?.let {
-      return Uri.decode(it.groupValues[1].trim())
-    }
-    return Regex("filename=\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(disposition)?.groupValues?.get(1)
+    val name =
+      Regex("filename\\*=UTF-8''([^;]+)", RegexOption.IGNORE_CASE).find(disposition)?.let {
+        Uri.decode(it.groupValues[1].trim())
+      } ?: Regex("filename=\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(disposition)?.groupValues?.get(1)
+    // A name only, never a path.
+    return name?.substringAfterLast('/')?.substringAfterLast('\\')?.takeIf { it.isNotBlank() }
   }
 
   private fun save(file: JSONObject) {
