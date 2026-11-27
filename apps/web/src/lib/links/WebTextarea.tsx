@@ -95,15 +95,19 @@ export function WebTextarea({
       }}
       onBlur={(event) => {
         onBlur?.(event);
-        const element = event.currentTarget;
+        // Back in it meanwhile (the field is the one there now): it stays.
         const done = () => {
-          if (document.activeElement !== element) setTyping(false);
+          if (!field.current || document.activeElement !== field.current) setTyping(false);
         };
         if (!pressed.current) return done();
-        // After the press's click (it comes right after the button is let go).
-        const later = () => setTimeout(done);
-        document.addEventListener('pointerup', later, { capture: true, once: true });
-        document.addEventListener('pointercancel', later, { capture: true, once: true });
+        // After the press's click (it comes right after the button is let go, or never).
+        const later = () => {
+          document.removeEventListener('pointerup', later, true);
+          document.removeEventListener('pointercancel', later, true);
+          setTimeout(done);
+        };
+        document.addEventListener('pointerup', later, true);
+        document.addEventListener('pointercancel', later, true);
       }}
       {...props}
     />
