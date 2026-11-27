@@ -3374,6 +3374,9 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   this: on a machine with any certificate electron-builder signs with that one.) A deb builds on
   the Mac too (`npx electron-builder --linux deb --x64`, binaries inside are the Mac's – only for
   checking the package); AppImage only on Linux.
+- Planned (the user, 2026-11-27): releases are also to build an iPhone/iPad and an Android app –
+  none exists in the repo yet (no Capacitor/React Native/Expo project). The Mac stays Apple
+  Silicon only, for every app (Desktop, Cloud, Writer, Sender): no Intel build is to come back.
 - Linux: system window frame with the menu bar hidden (Alt shows it, „Datei“ in place of the app
   menu); LibreOffice is never loaded – found at `/usr/bin/soffice`, `/usr/lib*/libreoffice`,
   `/opt/libreoffice*`, `/snap/bin/libreoffice`, else a dialog says to install it with the package
