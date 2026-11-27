@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, or } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   type Attachment,
@@ -13,6 +13,7 @@ import {
   writerParagraphSchema,
   writerText,
   type CreateWriterAiProposalInput,
+  type WriterAiAsk,
   type WriterAiProposal,
   type WriterBlock,
   type WriterOperation,
@@ -22,6 +23,7 @@ import {
   WRITER_KINDS,
 } from '@slider/shared';
 import {
+  cloudNodes,
   documentAiProposals,
   documentComments,
   workspaces,
@@ -501,6 +503,53 @@ export async function listDocumentAi(
     .where(eq(documentAiProposals.documentId, document.id))
     .orderBy(asc(documentAiProposals.createdAt), asc(documentAiProposals.id));
   return toDtos(deps, document.workspaceId, rows);
+}
+
+/** How many of one's asks the side bar lists, and for how long a finished one stays. */
+const ASKS_LISTED = 5;
+const ASK_LISTED_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * One's own asks of a document AI in the workspace, the latest first: those at work and those
+ * finished within the day – only in documents one still opens and that are not deleted.
+ */
+export async function listOwnDocumentAi(
+  deps: AppDeps,
+  userId: string,
+  workspaceId: string,
+): Promise<WriterAiAsk[]> {
+  const since = new Date(deps.clock.now().getTime() - ASK_LISTED_MS);
+  const rows = await deps.db
+    .select({ proposal: documentAiProposals })
+    .from(documentAiProposals)
+    .innerJoin(cloudNodes, eq(cloudNodes.id, documentAiProposals.documentId))
+    .where(
+      and(
+        eq(documentAiProposals.createdBy, userId),
+        eq(cloudNodes.workspaceId, workspaceId),
+        or(eq(documentAiProposals.status, 'running'), gt(documentAiProposals.updatedAt, since)),
+      ),
+    )
+    .orderBy(desc(documentAiProposals.createdAt), desc(documentAiProposals.id))
+    .limit(ASKS_LISTED);
+  const documents = new Map(
+    await Promise.all(
+      [...new Set(rows.map((row) => row.proposal.documentId))].map(
+        async (id) => [id, await documentOf(deps, userId, id).catch(() => null)] as const,
+      ),
+    ),
+  );
+  const dtos = await toDtos(
+    deps,
+    workspaceId,
+    rows.map((row) => row.proposal),
+  );
+  return dtos.flatMap((dto) => {
+    const document = documents.get(dto.documentId);
+    return document && !document.deletedAt
+      ? [{ ...dto, title: document.title, fileName: document.fileName }]
+      : [];
+  });
 }
 
 const EDITORS_ONLY = 'Die KI ändert den Text: Das geht nur, wo du selbst schreiben kannst.';

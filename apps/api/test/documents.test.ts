@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { blankOdt, OdtDocument } from '@slider/odt';
 import {
   inkStrokeLines,
+  writerAiAskSchema,
   writerAiProposalSchema,
   writerCommentSchema,
   writerDocumentSchema,
@@ -385,6 +386,19 @@ describe('Writer – text documents', () => {
       commentId: comment.id,
       author: { type: 'ai' },
     });
+    // The side bar's „Agenten“ lists one's own asks with their document – nobody else's.
+    const asks = async (cookie?: string) =>
+      writerAiAskSchema.array().parse(
+        await (
+          await ctx.request(`/api/workspaces/${ctx.workspaceId}/document-ai-proposals`, {
+            cookie,
+          })
+        ).json(),
+      );
+    expect(await asks()).toMatchObject([
+      { id: proposal!.id, status: 'applied', title: document.title, fileName: document.fileName },
+    ]);
+    expect(await asks(reviewer.cookie)).toEqual([]);
     const shown = JSON.stringify(ai.requests.at(-1)?.messages);
     expect(shown).toContain('<p id=\\"w3\\">');
     expect(shown).toContain('Größer denken');

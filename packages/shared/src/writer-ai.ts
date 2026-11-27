@@ -38,6 +38,16 @@ export const writerAiProposalSchema = z.object({
 });
 export type WriterAiProposal = z.infer<typeof writerAiProposalSchema>;
 
+/**
+ * One's own ask of a document's AI as the side bar lists it under „Agenten“ – at work, or done
+ * lately: with the document it is in (a `.md` opens as a page).
+ */
+export const writerAiAskSchema = writerAiProposalSchema.extend({
+  title: z.string(),
+  fileName: z.string(),
+});
+export type WriterAiAsk = z.infer<typeof writerAiAskSchema>;
+
 export const createWriterAiProposalInputSchema = z.object({
   /** Made in the browser: asked twice is asked once. */
   id: z.string().uuid(),

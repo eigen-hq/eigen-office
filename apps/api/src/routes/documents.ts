@@ -11,6 +11,7 @@ import {
   MAX_WRITER_PICTURE_BYTES,
   generateEditImageInputSchema,
   stockOrientationSchema,
+  type WriterAiAsk,
   type WriterAiProposal,
   type WriterComment,
   type WriterDocument,
@@ -28,6 +29,7 @@ import { assertWithinLimit, fixedWindow } from '../http/rate-limit';
 import { readJson } from '../http/validate';
 import {
   listDocumentAi,
+  listOwnDocumentAi,
   moveDocumentAi,
   startDocumentAi,
   stopDocumentAi,
@@ -266,6 +268,10 @@ export function documentsRoutes(deps: AppDeps, live = new DocumentLive()) {
         return c.body(null, 204);
       })
       // A comment handed to the AI (`services/document-ai`): on the workspace's AI key.
+      // One's own asks in the workspace, for the side bar's „Agenten“.
+      .get('/workspaces/:workspaceId/document-ai-proposals', viewer, async (c) =>
+        c.json<WriterAiAsk[]>(await listOwnDocumentAi(deps, user(c), c.req.param('workspaceId'))),
+      )
       .get('/documents/:documentId/ai-proposals', viewer, async (c) =>
         c.json<WriterAiProposal[]>(await listDocumentAi(deps, user(c), c.req.param('documentId'))),
       )
