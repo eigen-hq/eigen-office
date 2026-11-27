@@ -1,14 +1,22 @@
-# Slider
+# Eigen Office
 
-Feedback on presentations, right on the slide. Link a presentation from Nextcloud or a plain
-link, or upload a `.pptx`. Your team pins comments, frames, arrows and
-drawings to the exact spot on a slide, replies and ticks them off. Linked decks update when the
-file changes, and comments stay on their slides. Edit the slides right in the browser, let the
-AI turn comments into the next version, or work offline in the desktop app. Collect research
-next to the slides and ask about it, and connect Claude or ChatGPT over MCP.
+The office of [Eigen](https://github.com/eigen-hq): apps for a team that work as one, with one
+account and one AI, self-hosted or on [office.bertro.dev](https://office.bertro.dev).
 
-Hosted version: [office.bertro.dev](https://office.bertro.dev) | Website:
-[bertro.dev/slider](https://bertro.dev/slider)
+- **Slider** – presentations everyone gets a say in. Link a deck from Nextcloud or a plain link,
+  or upload a `.pptx`; your team pins comments, frames, arrows and drawings to the exact spot on
+  a slide, replies and ticks them off. Edit the slides in the browser and let the AI turn the
+  comments into the next version.
+- **Cloud** – files and folders, your own and your team's areas, shared inside and outside.
+- **Writer** – documents written together.
+- **Reader** – PDFs and forms filled in together.
+- **Sender** – conversations and mail.
+- **Pages** – a team's pages, with drawings and handwriting the AI reads.
+
+Collect research beside the work and ask about it, work offline in the desktop apps, and connect
+Claude or ChatGPT over MCP.
+
+Website: [bertro.dev/office](https://bertro.dev/office/)
 
 ## Run it yourself
 
@@ -27,12 +35,12 @@ OIDC). Then sign in and enter the token once more to become admin.
 
 Full guide (German): [docs/self-hosting.md](docs/self-hosting.md).
 
-## Desktop app
+## Desktop apps
 
-Slider for Mac (Apple Silicon) and Linux (x64 and arm64, AppImage and deb) is on the
-[latest release](https://github.com/eigen-hq/eigen-office/releases/latest). It works offline, keeps
-presentations on your computer and can sign in to office.bertro.dev or your own server
-(„Anderer Server“ on the account page). On a Mac it loads LibreOffice on first start if none is
+Slider, Cloud, Writer and Sender for Mac (Apple Silicon) and Linux (x64 and arm64, AppImage and
+deb) are on the [latest release](https://github.com/eigen-hq/eigen-office/releases/latest). Slider
+works offline, keeps presentations on your computer and can sign in to office.bertro.dev or your
+own server („Anderer Server“ on the account page). On a Mac it loads LibreOffice on first start if none is
 installed; on Linux install it with your package manager.
 
 ## Develop
@@ -63,21 +71,20 @@ built-in preview and the editor stays closed.
 
 ## Contributing
 
-Issues and pull requests are welcome. This repository receives each release as one commit, so
-accepted pull requests are taken over by hand into the next release. By opening one you agree
-that your contribution may be used under this repository's license and under Slider's commercial
-licenses. Please run `bun run lint && bun run typecheck && bun run test` first.
+Issues and pull requests are welcome; Eigen Office is developed in this repository. By opening
+one you agree that your contribution may be used under this repository's license and under Eigen
+Office's commercial licenses. Please run `bun run lint && bun run typecheck && bun run test` first.
 
 ## License
 
-Slider is open source under the [European Union Public Licence v1.2](LICENSE) (EUPL-1.2). You
+Eigen Office is open source under the [European Union Public Licence v1.2](LICENSE) (EUPL-1.2). You
 may use, change and host it, including commercially. If you distribute a changed version or offer
 it to others over a network, you must share its source code under the EUPL or one of the
 compatible licenses it lists. All 23 language versions of the EUPL are equally valid; the German
 one is in [LICENSE.de.txt](LICENSE.de.txt).
 
-The EUPL covers the code. The name Slider, its logo and the website's texts and pictures
-(`apps/site`) are not licensed under it: all rights reserved.
+The EUPL covers the code. The names Eigen, Eigen Office and Slider, their logos and the website's
+texts and pictures (`apps/site`) are not licensed under it: all rights reserved.
 
 Support, hosting and operation for public administrations and companies, as well as a commercial
 license for those who need other terms: office@bertro.dev.
