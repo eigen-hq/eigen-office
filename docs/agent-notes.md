@@ -2529,13 +2529,31 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   `/cloud/nodes/:id/pages`. Sized by the pages: ≤ 400 px tall, ≤ 512 px wide. `MessageList`
   keeps a list that stood at its end there while previews and cards load (`ResizeObserver`).
   Checked in a scratch e2e with real LibreOffice (PDF, DOCX, PPTX; dark, light, phone).
-- Link cards (`services/link-previews.ts`, `LinkCard.tsx`): the first https address in a message
-  (by `linkify`, as the words show it), not this instance's own host. `GET
-  /workspaces/:ws/link-preview?url=` (204 = none) and `/link-preview/image`: the server reads the
-  page's head through `safeFetch` (≤ 512 KB, HTML only, 10 s for page + picture, 200 lookups/h per
-  person), `og:`/`twitter:` tags, else `<title>`; the picture redrawn as JPEG ≤ 640 px (no SVG).
-  Kept globally under `link-previews/<sha256>` (7 days found, 1 none, swept after 30 by the
-  retention job). Tests fake the web via `deps.linkPreviews`. In the privacy template (Sender).
+- Link cards (`services/link-previews.ts`): not this instance's own host. `GET
+  /workspaces/:ws/link-preview?url=` (204 = none), `/link-preview/image` and `/link-preview/icon`:
+  the server reads the page's head through `safeFetch` (≤ 512 KB, HTML only, 10 s for page +
+  picture, 200 lookups/h per person), `og:`/`twitter:` tags, else `<title>`; the picture redrawn
+  as JPEG ≤ 640 px (no SVG); the icon the largest of two its head names, else `/favicon.ico`,
+  drawn as a 64 px PNG (`icon: true`). Kept globally under `link-previews/<sha256>` (7 days
+  found, 1 none, swept after 30 by the retention job). Tests fake the web via `deps.linkPreviews`.
+  In the privacy template (Sender).
+- One rule for web addresses in written text, everywhere (`lib/links`, 2026-11-27): a written
+  `https?://` address in a sentence is its chip (`LinkChip`: icon + page title, else short address
+  + link icon), alone on its line its card (`LinkCard`, the chip when there is no card),
+  `<https://…>` always the chip, `[Wörter](url)` its words, bare `example.de`/mail/phone a plain
+  link. Derived from how it is written – nothing stored per link. Used in Sender messages
+  (`LinkedText chips`), comments (`CommentBody`), the AI chat (`rich-text.tsx`), material notes and
+  link rows, PDF comments, pages. Asked only once on screen (`useSeen`), under the workspace of
+  `LinkScope` (app root – `lib/` can't read features). Not for received mail (a fetch could open
+  one-time/unsubscribe links), not in Writer (own engine), not yet in to-do descriptions, event
+  notes, mail compose. Sender showed a card under every message with an address before; now the
+  rule above.
+- Pages: `WebChipNode`/`WebCardNode` (`pages/lib/nodes.tsx`), Markdown in/out via
+  `WEB_CHIP_TRANSFORMER`/`WEB_CARD_TRANSFORMER`; a chip alone in its paragraph writes `<url>` (else
+  it would read back as a card). `units.ts`'s raw-HTML line test needs a tag name ending in space,
+  `/` or `>` (CommonMark), so `<https://…>` is no HTML block. Typing an address + space makes a
+  chip, never a card (that would break writing); pasting one on an empty line makes the card
+  (`web-links.ts`). `WebLinkBar` switches a picked one: „Link | Erwähnung | Karte“.
 
 ## To-dos – „Aufgaben“ in the UI (`services/todos.ts`, `routes/todos.ts`, `features/cloud/components/todos/`)
 
