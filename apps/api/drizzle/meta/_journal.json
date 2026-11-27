@@ -1394,6 +1394,13 @@
       "when": 1801915200000,
       "tag": "0198_user_companion",
       "breakpoints": true
+    },
+    {
+      "idx": 199,
+      "version": "7",
+      "when": 1802001600000,
+      "tag": "0199_user_kept",
+      "breakpoints": true
     }
   ]
 }

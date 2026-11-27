@@ -49,6 +49,7 @@ export * from './reader';
 export * from './sender';
 export * from './calls';
 export * from './companion';
+export * from './kept';
 export * from './mail';
 export * from './todos';
 export * from './calendar';

@@ -1,11 +1,14 @@
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
+import { z } from 'zod';
 import {
   deleteAccountInputSchema,
   domainJoinAllowed,
+  keptSchema,
   updateCallVoiceInputSchema,
   updateMeInputSchema,
   type DisconnectNextcloudResult,
+  type KeptResponse,
   type MeResponse,
   type NextcloudConnection,
   type SuccessorChoice,
@@ -22,6 +25,7 @@ import { readJson } from '../http/validate';
 import { deleteAccount, successorChoices } from '../services/account-deletion';
 import { callVoiceSample, callVoices, pickCallVoice } from '../services/call-voices';
 import { exportAccount } from '../services/account-export';
+import { keep, readKept } from '../services/kept';
 import {
   setShowExtensions,
   setMeetingNotice,
@@ -116,6 +120,24 @@ export function meRoutes(deps: AppDeps, gate: InstanceGate) {
           for (const deckId of renamed.deckIds) deps.live?.commentsChanged(deckId);
         }
         return c.json<MeResponse>(await meResponse(deps, gate, c, viewer));
+      })
+      /** What the account keeps of how it left things – the same on each of its devices. */
+      .get('/me/kept/:key', viewerMiddleware(deps), async (c) => {
+        requireOwner(c.var.viewer);
+        const key = c.req.param('key');
+        if (!keptSchema(key)) throw notFound();
+        return c.json<KeptResponse>({
+          value: await readKept(deps.db, c.var.viewer.author.id, key),
+        });
+      })
+      .put('/me/kept/:key', viewerMiddleware(deps), async (c) => {
+        requireOwner(c.var.viewer);
+        const key = c.req.param('key');
+        const schema = keptSchema(key);
+        if (!schema) throw notFound();
+        const { value } = await readJson(c, z.object({ value: schema }), 64 * 1024);
+        await keep(deps.db, c.var.viewer.author.id, key, value);
+        return c.json<KeptResponse>({ value });
       })
       /** The voice agents speak with where the viewer calls them, and those to pick from. */
       .get('/me/call-voice', viewerMiddleware(deps), async (c) => {

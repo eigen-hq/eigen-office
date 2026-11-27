@@ -64,6 +64,7 @@ import {
 import type { AppDeps } from '../deps';
 import { ApiError, notFound } from '../http/errors';
 import { callsOf } from './call-records';
+import { allKept } from './kept';
 import { normalizeEmail } from './accounts';
 import { inviteEntries, invitesTo } from './data-requests';
 import { cloudContext, type CloudCtx } from './cloud/context';
@@ -88,6 +89,7 @@ import { agentMessagesWhere, type AgentMessageRow } from './agent-chats';
  * `mail.json` (their mailboxes and mail, attachments in `mail/`), `mail-regeln.json` (their rules
  * for senders),
  * `bearbeitungen.json` (their edit steps), `woerterbuch.json` (their own spelling words),
+ * `gemerkt.json` (what they left as it is on each device: agents beside mails, hidden calendars),
  * `dateien.json` (their own files in Cloud, listed) and `aufnahmen/` (their recordings, with
  * transcripts, and rehearsals). Others' words stay out, except in what is one's own (a
  * colleague's message in one's agent stays, labelled as theirs). Secrets are left out: tokens,
@@ -730,6 +732,17 @@ async function buildExport(
     'woerterbuch.json',
     json(words.map((row) => ({ word: row.word, createdAt: row.createdAt.toISOString() }))),
   );
+  // What one keeps of how one left things – the same on each device (`services/kept.ts`).
+  zip.file(
+    'gemerkt.json',
+    json(
+      (await allKept(db, userId)).map((row) => ({
+        key: row.key,
+        value: row.value,
+        updatedAt: row.updatedAt.toISOString(),
+      })),
+    ),
+  );
 
   // Their own files in Cloud („Meine Dateien“): what is there, by name and place. The files
   // themselves can be many times an archive built in memory – they are downloaded in Cloud.
@@ -1358,6 +1371,7 @@ ki-chats.json         Deine Chats mit der KI auf den Materialseiten
 agenten.json          Deine Agenten in der Cloud: ihre Chats und was sie geschrieben haben; was du Agenten anderer geschrieben hast
 bearbeitungen.json    Deine Bearbeitungsschritte in Präsentationen
 woerterbuch.json      Wörter, die du der Rechtschreibprüfung beigebracht hast
+gemerkt.json          Was auf all deinen Geräten gleich bleibt: der Agent neben einer Mail, ausgeblendete Kalender
 dateien.json          Deine eigenen Dateien und Ordner in der Cloud; die Dateien selbst lädst du dort herunter
 material.json         Notizen, Links und Dateien (nur benannt), die du auf Materialseiten gelegt hast
 nachrichten.json      Deine Nachrichten im Sender (nicht die der anderen)

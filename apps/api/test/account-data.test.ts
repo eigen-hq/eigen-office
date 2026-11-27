@@ -263,6 +263,20 @@ describe('data export (BER-145)', () => {
     expect((await companion('immer')).status).toBe(400);
     expect((await companion('ask')).status).toBe(200);
     expect((await meNow())?.companion).toBe('ask');
+    // Kept the same on each device: only known keys, each its shape.
+    const kept = (key: string, value?: unknown) =>
+      ctx.request(`/api/me/kept/${key}`, {
+        method: value === undefined ? 'GET' : 'PUT',
+        ...(value === undefined ? {} : { json: { value } }),
+        cookie: person.cookie,
+      });
+    expect(await (await kept('mail-agents')).json()).toEqual({ value: null });
+    expect((await kept('mail-agents', { t1: 'a1' })).status).toBe(200);
+    expect(await (await kept('mail-agents')).json()).toEqual({ value: { t1: 'a1' } });
+    expect((await kept('mail-agents', ['a1'])).status).toBe(400);
+    expect((await kept(`hidden-calendars:${ctx.workspaceId}`, ['c1', 'c2'])).status).toBe(200);
+    expect((await kept('theme', 'dark')).status).toBe(404);
+    expect((await kept('theme')).status).toBe(404);
     const own = await createReadyDeck(ctx, { title: 'Annas Deck' });
     const pptxKey = blobKeys.pptx(own.deckId, own.revisionId);
     await ctx.deps.storage.put(pptxKey, new TextEncoder().encode('PPTX'));
@@ -658,6 +672,15 @@ describe('data export (BER-145)', () => {
         .map((each) => each.status)
         .sort(),
     ).toEqual([200, 429]);
+    expect(await read('gemerkt.json')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'mail-agents', value: { t1: 'a1' } }),
+        expect.objectContaining({
+          key: `hidden-calendars:${ctx.workspaceId}`,
+          value: ['c1', 'c2'],
+        }),
+      ]),
+    );
     expect(await read('woerterbuch.json')).toEqual([
       { word: 'Slider-Deck', createdAt: expect.any(String) },
     ]);

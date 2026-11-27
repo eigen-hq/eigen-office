@@ -661,6 +661,23 @@ export const workspaceFonts = pgTable(
 );
 export type WorkspaceFontRow = typeof workspaceFonts.$inferSelect;
 
+/**
+ * What an account keeps of how it left things, the same on each of its devices (`services/kept.ts`,
+ * migration 0199) – which agent was asked beside a mail, the calendars it hid.
+ */
+export const userKept = pgTable(
+  'user_kept',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    value: jsonb('value').$type<unknown>().notNull(),
+    updatedAt: timestamptz('updated_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+);
+
 /** A word an account said is right („Passt so“): the spell check no longer marks it, anywhere. */
 export const userWords = pgTable(
   'user_words',

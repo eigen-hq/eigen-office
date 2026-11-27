@@ -1,9 +1,20 @@
-import type { Calendar, CloudAreaColor } from '@slider/shared';
-import { useId, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
+import {
+  keptHiddenCalendarsKey,
+  MAX_KEPT_HIDDEN_CALENDARS,
+  type Calendar,
+  type CloudAreaColor,
+} from '@slider/shared';
+import {
+  useId,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
 import { Link } from 'react-router';
-import { useCreateCalendar, useDeleteCalendar, useUpdateCalendar } from '@/lib/api';
+import { useCreateCalendar, useDeleteCalendar, useKept, useUpdateCalendar } from '@/lib/api';
 import { routes } from '@/lib/routes';
-import { readJson, writeString } from '@/lib/storage';
 import {
   ConfirmDialog,
   ContextMenu,
@@ -21,25 +32,24 @@ import { colorOf, TODOS } from './entries';
 import { WORKSPACE_SOURCE } from './sources';
 
 const hiddenKey = (workspaceId: string) => `slider.calendar.hidden:${workspaceId}`;
+const NONE_HIDDEN: readonly string[] = [];
+const hiddenList = (value: unknown): readonly string[] =>
+  Array.isArray(value) ? value.filter((each): each is string => typeof each === 'string') : [];
 
-/** The calendars – and the to-dos – one hid, remembered in this browser. */
+/** The calendars one hid here – kept on the account, the same on the phone beside the computer. */
 export function useHiddenCalendars(workspaceId: string) {
-  const [hidden, setHidden] = useState<ReadonlySet<string>>(
-    () =>
-      new Set(
-        readJson(
-          hiddenKey(workspaceId),
-          (value) => (Array.isArray(value) ? value.filter((each) => typeof each === 'string') : []),
-          [] as string[],
-        ),
-      ),
+  const [list, keep] = useKept(
+    keptHiddenCalendarsKey(workspaceId),
+    hiddenKey(workspaceId),
+    hiddenList,
+    NONE_HIDDEN,
   );
+  const hidden = useMemo<ReadonlySet<string>>(() => new Set(list), [list]);
   const toggle = (id: string) => {
     const next = new Set(hidden);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    setHidden(next);
-    writeString(hiddenKey(workspaceId), JSON.stringify([...next]));
+    keep([...next].slice(-MAX_KEPT_HIDDEN_CALENDARS));
   };
   return { hidden, toggle };
 }

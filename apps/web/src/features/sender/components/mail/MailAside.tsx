@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import {
+  KEPT_MAIL_AGENTS,
+  MAX_KEPT_MAIL_AGENTS,
   MAX_TODO_TITLE,
   type MailContextDocument,
   type MailContextEvent,
@@ -19,10 +21,10 @@ import {
   useSummarizeMail,
   useCreateTodo,
   useTodos,
+  useKept,
 } from '@/lib/api';
 import { draftsQueryKey } from '@/lib/drafts';
 import { CLOUD_EVENT_PARAM, routes } from '@/lib/routes';
-import { createStoredStore } from '@/lib/storage';
 import {
   AsideAgent,
   AsideBullets,
@@ -43,29 +45,27 @@ import { MailAvatar } from './MailAvatar';
 const BESIDE = { target: '_blank', rel: 'noopener noreferrer' } as const;
 
 /** The agent asked beside each mail (thread id → agent id), the latest last – a few hundred kept. */
-const MAX_REMEMBERED = 200;
-const agentsStore = createStoredStore<Record<string, string>>({
-  key: 'slider.mail.agents',
-  parse: (value) =>
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? Object.fromEntries(
-          Object.entries(value).filter((entry): entry is [string, string] => {
-            return typeof entry[1] === 'string';
-          }),
-        )
-      : {},
-  fallback: {},
-  crossTab: true,
-});
+const NO_AGENTS: Readonly<Record<string, string>> = {};
+const agentsOf = (value: unknown): Record<string, string> =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(
+        Object.entries(value).filter((entry): entry is [string, string] => {
+          return typeof entry[1] === 'string';
+        }),
+      )
+    : {};
 
-/** The agent asked beside this mail – opened again, the chat with it is back. `null`: forgotten. */
+/**
+ * The agent asked beside this mail – opened again, the chat with it is back, on each device (the
+ * phone beside the computer too). `null`: forgotten.
+ */
 function useMailAgent(threadId: string) {
-  const all = useSyncExternalStore(agentsStore.subscribe, agentsStore.getSnapshot);
+  const [all, keep] = useKept(KEPT_MAIL_AGENTS, 'slider.mail.agents', agentsOf, NO_AGENTS);
   const set = (agentId: string | null) => {
-    const { [threadId]: _gone, ...rest } = agentsStore.getSnapshot();
+    const { [threadId]: _gone, ...rest } = all;
     const entries = Object.entries(rest);
     if (agentId) entries.push([threadId, agentId]);
-    agentsStore.set(Object.fromEntries(entries.slice(-MAX_REMEMBERED)));
+    keep(Object.fromEntries(entries.slice(-MAX_KEPT_MAIL_AGENTS)));
   };
   return [all[threadId] ?? null, set] as const;
 }
