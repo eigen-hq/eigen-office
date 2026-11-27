@@ -38,6 +38,7 @@ import {
 } from '@/ui';
 import type { PdfComments, Thread } from './comments';
 import { useReader } from './session';
+import { WebText } from '@/lib/links';
 
 /**
  * A thread, or the comment being written, and where its words stand: px from the pages' top
@@ -271,7 +272,7 @@ function Message({
         <>
           {comment.body && (
             <p className="text-body leading-5 break-words whitespace-pre-wrap text-fg">
-              {comment.body}
+              <WebText text={comment.body} />
             </p>
           )}
           <SentAttachments attachments={comment.attachments} />

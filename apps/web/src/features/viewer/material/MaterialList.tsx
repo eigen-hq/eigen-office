@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { FileIcon } from '@/features/cloud';
 import { useDeleteMaterial, useMaterial, useMe, type BoardRef } from '@/lib/api';
 import { formatFileSize, formatRelativeTime } from '@/lib/format';
+import { useLinkPreview, WebText } from '@/lib/links';
 import {
   ConfirmDialog,
   Icon,
@@ -250,7 +251,12 @@ function Row({
   onToggle: () => void;
   onDelete?: () => void;
 }) {
-  const title = titleOf(entry);
+  const linkUrl = entry.kind === 'item' && entry.item.kind === 'link' ? entry.item.url : undefined;
+  // A link saved without a title shows the page's own, beside its site's icon (`lib/links`).
+  const link = useLinkPreview(linkUrl ?? undefined);
+  const [linkIconFailed, setLinkIconFailed] = useState(false);
+  const named = entry.kind === 'item' && entry.item.kind === 'link' && entry.item.text.trim();
+  const title = (!named && link.preview?.title) || titleOf(entry);
   const author = entry.kind === 'file' ? entry.material.author : entry.item.author;
   const when = formatRelativeTime(entry.createdAt);
   let icon: ReactNode;
@@ -285,7 +291,17 @@ function Row({
             : 'notes';
     icon = (
       <span className="flex size-8 shrink-0 items-center justify-center rounded-chip bg-surface-2 text-fg-muted">
-        <Icon name={symbol} size={18} />
+        {link.icon && !linkIconFailed ? (
+          <img
+            src={link.icon}
+            alt=""
+            draggable={false}
+            onError={() => setLinkIconFailed(true)}
+            className="size-[18px] rounded-[3px] object-contain"
+          />
+        ) : (
+          <Icon name={symbol} size={18} />
+        )}
       </span>
     );
     if (item.kind === 'link') {
@@ -360,7 +376,7 @@ function Row({
             <div className="flex flex-col gap-1.5">
               {restOf(note.text, title).map((paragraph, index) => (
                 <p key={index} className="whitespace-pre-line">
-                  {paragraph}
+                  <WebText text={paragraph} />
                 </p>
               ))}
             </div>
