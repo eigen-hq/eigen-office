@@ -124,7 +124,9 @@ final class Session: NSObject, ObservableObject, ASWebAuthenticationPresentation
       session.presentationContextProvider = self
       session.prefersEphemeralWebBrowserSession = false
       authSession = session
-      session.start()
+      if !session.start() {
+        done.resume(throwing: SignInError.message("Der Browser ließ sich nicht öffnen."))
+      }
     }
   }
 
@@ -228,6 +230,9 @@ enum Keychain {
     var add = query
     add[kSecValueData as String] = data
     add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-    SecItemAdd(add as CFDictionary, nil)
+    let status = SecItemAdd(add as CFDictionary, nil)
+    #if DEBUG
+      print("OFFICE_KEYCHAIN \(status)")
+    #endif
   }
 }

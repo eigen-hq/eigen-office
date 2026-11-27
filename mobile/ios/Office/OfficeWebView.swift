@@ -77,7 +77,10 @@ struct OfficeWebView: UIViewRepresentable {
     /// its sign-in is the system browser's, never this view's.
     func watch(_ view: WKWebView) {
       watching = view.observe(\.url, options: [.new]) { [weak self] view, _ in
-        guard let self, let url = view.url, self.isOwn(url), url.path == "/login" else { return }
+        // Not „Weiteres Konto hinzufügen“ (`/login?add=1`): that is one more account here.
+        guard let self, let url = view.url, self.isOwn(url), url.path == "/login",
+          !(url.query ?? "").contains("add=1")
+        else { return }
         DispatchQueue.main.async { self.parent.signedOut() }
       }
     }

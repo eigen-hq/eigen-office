@@ -16,6 +16,16 @@
     /// `OFFICE_INK_PROBE`: a JSON file of lines – asked of `window.sliderInk` once a page loads.
     static let inkProbe = env["OFFICE_INK_PROBE"]
 
+    /// `OFFICE_COOKIE_PROBE`: the session cookie as an https server gets it, printed.
+    static func cookieProbe() async {
+      guard env["OFFICE_COOKIE_PROBE"] != nil else { return }
+      await Session.setCookie(SignedIn(server: "https://office.example", token: "probe"))
+      for cookie in await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+      where cookie.domain.contains("office.example") {
+        print("OFFICE_HTTPS_COOKIE \(cookie.name) secure=\(cookie.isSecure) httpOnly=\(cookie.isHTTPOnly) path=\(cookie.path) domain=\(cookie.domain) sameSite=\(cookie.sameSitePolicy?.rawValue ?? "-")")
+      }
+    }
+
     @MainActor static func waitForCallback(_ session: Session) async {
       guard let path = callbackFile else { return }
       for _ in 0..<240 {

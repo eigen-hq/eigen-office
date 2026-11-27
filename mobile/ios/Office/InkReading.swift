@@ -59,12 +59,27 @@ struct VisionReader: HandwritingReader {
     request.recognitionLanguages = languages
     request.usesLanguageCorrection = true
     try VNImageRequestHandler(cgImage: image).perform([request])
-    // Left to right: a line may come back in pieces.
-    return (request.results ?? [])
-      .sorted { $0.boundingBox.minX < $1.boundingBox.minX }
+    return inReadingOrder(request.results ?? [])
       .compactMap { $0.topCandidates(1).first?.string }
       .joined(separator: " ")
       .trimmingCharacters(in: .whitespaces)
+  }
+
+  /// A line may come back in pieces, and as two rows where its strokes overlapped: top row
+  /// first, each left to right (Vision's y grows upwards).
+  static func inReadingOrder(_ pieces: [VNRecognizedTextObservation]) -> [VNRecognizedTextObservation] {
+    var rows: [[VNRecognizedTextObservation]] = []
+    for piece in pieces.sorted(by: { $0.boundingBox.midY > $1.boundingBox.midY }) {
+      if let last = rows.last?.first,
+        abs(last.boundingBox.midY - piece.boundingBox.midY)
+          < min(last.boundingBox.height, piece.boundingBox.height) / 2
+      {
+        rows[rows.count - 1].append(piece)
+      } else {
+        rows.append([piece])
+      }
+    }
+    return rows.flatMap { $0.sorted { $0.boundingBox.minX < $1.boundingBox.minX } }
   }
 
   /// The line's strokes, black on white, scaled to `lineHeight` with round ends.

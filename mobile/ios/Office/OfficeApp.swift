@@ -19,6 +19,7 @@ struct OfficeApp: App {
             #if DEBUG
               .onAppear { print("OFFICE_START") }
               .task {
+                await Probe.cookieProbe()
                 guard let server = Probe.signInTo else { return }
                 session.serverText = server
                 await session.signIn()
