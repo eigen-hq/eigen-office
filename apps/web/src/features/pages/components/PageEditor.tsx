@@ -135,7 +135,7 @@ function PageBody({ opened, editing, onDone, onEdit, onSync, placeholder }: Page
     sync.current = page;
     page.load();
     const off = editor.registerUpdateListener(({ dirtyElements, dirtyLeaves, tags }) => {
-      // What a drawing says, read by the AI (`InkReader`), is sent in Lesen too.
+      // What a drawing says, read on the device (`InkReader`), is sent in Lesen too.
       if (tags.has('page-load') || (!editor.isEditable() && !tags.has(INK_READ_TAG))) return;
       if (dirtyElements.size === 0 && dirtyLeaves.size === 0) return;
       page.changed();
@@ -259,7 +259,7 @@ function PageBody({ opened, editing, onDone, onEdit, onSync, placeholder }: Page
       <ClickableLinkPlugin />
       <MarkdownShortcutPlugin transformers={PAGE_TRANSFORMERS} />
       <PenCatcher onEdit={onEdit} />
-      {canAsk && <InkReader documentId={id} />}
+      {canAsk && <InkReader />}
       {editing && <SlashMenu />}
       {editing && <DiagramPlugin />}
       {editing && <FormatBar />}

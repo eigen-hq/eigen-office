@@ -15,7 +15,6 @@ import {
   ColorSwatches,
   IconButton,
   SegmentedControl,
-  Spinner,
   Toolbar,
   ToolbarDivider,
   type IconName,
@@ -53,7 +52,7 @@ import {
   type PenStart,
   type PenTool,
 } from '../lib/pen';
-import { readInkNow, readStrokesNow } from '../lib/ink-read';
+import { readInkNow, readStrokesNow, useInkRecognizer } from '../lib/ink-read';
 import { recognize } from '../lib/shapes';
 import { usePageHost } from './PageHost';
 import { useBlockPick } from './useBlockPick';
@@ -618,6 +617,7 @@ export function InkBlock({ text, nodeKey }: { text: string; nodeKey: NodeKey }) 
 
   const host = usePageHost();
   const [reading, setReading] = useState(false);
+  const readable = useInkRecognizer();
   const hasInk = ink.strokes.length > 0;
   /** The words, line by line – `null` (told) when there are none or they could not be read. */
   /** The lasso's strokes, or the drawing whole. */
@@ -887,24 +887,21 @@ export function InkBlock({ text, nodeKey }: { text: string; nodeKey: NodeKey }) 
               ))
             )}
             <ToolbarDivider />
-            {reading ? (
-              <span className="flex size-7 items-center justify-center" aria-label="Wird gelesen">
-                <Spinner size={16} />
-              </span>
-            ) : (
+            {/* What the handwriting says – only where this device reads it (`lib/ink-read.ts`). */}
+            {readable && (
               <>
                 <IconButton
                   size="sm"
                   icon="contentCopy"
                   label="Als Text kopieren"
-                  disabled={!hasInk}
+                  disabled={!hasInk || reading}
                   onClick={copyText}
                 />
                 <IconButton
                   size="sm"
                   icon="textFields"
                   label="In Text umwandeln"
-                  disabled={!hasInk}
+                  disabled={!hasInk || reading}
                   onClick={() => void toText()}
                 />
               </>

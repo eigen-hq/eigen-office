@@ -25,6 +25,7 @@ import {
   wipePoints,
 } from './ink';
 import { recognize } from './shapes';
+import { inkLines } from './ink-read';
 import { $isCalloutNode, $isLiveBlockNode, $isPageLinkNode, $isRawBlockNode } from './nodes';
 import { PAGE_NODES } from './transformers';
 import type { Line } from './units';
@@ -481,6 +482,37 @@ describe('page codec', () => {
     const lifted = parseInk(liftInk('```ink 300\npen text 4 10 10 20 20\n```', 40));
     expect(lifted.height).toBe(340);
     expect(lifted.strokes[0]!.stroke.points[0]).toEqual([10, 50]);
+    // Read on the device, line by line: pen strokes in the order drawn, a line those whose middles
+    // lie within its height; the marker and a form drawn true are no writing.
+    const page = parseInk(
+      [
+        '```ink 300',
+        'draw pen text 4 60 100 0 80 120 0',
+        'draw pen text 4 10 10 0 30 40 0',
+        'draw pen text 4 40 15 0 50 35 0',
+        'draw marker yellow 22 0 20 0 90 20 0',
+        'shape pen text 4 200 10 300 10 300 60',
+        '```',
+      ].join('\n'),
+    );
+    expect(inkLines(page.strokes)).toEqual([
+      [
+        [
+          { x: 10, y: 10 },
+          { x: 30, y: 40 },
+        ],
+        [
+          { x: 40, y: 15 },
+          { x: 50, y: 35 },
+        ],
+      ],
+      [
+        [
+          { x: 60, y: 100 },
+          { x: 80, y: 120 },
+        ],
+      ],
+    ]);
     // Held at its end, a stroke drawn nearly straight is a line, nearly round a circle, nearly a
     // box a box; a scribble stays as drawn.
     const wobbly = Array.from({ length: 30 }, (_, at) => [at * 10, (at % 2) * 3] as const);
