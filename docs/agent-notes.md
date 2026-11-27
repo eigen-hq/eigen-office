@@ -657,7 +657,9 @@ one setting for all.
   is deleted with its data and installed anew (`refuseOlder`). Before: development
   `Root-Bert/eigen-office` (remote `private`, history up to 1.6.18, tags not fetched) and the
   public copy `Root-Bert/office`, both archived; the private history never goes into `origin` –
-  never `git push --tags`/`--all`/`--mirror` to it from an old clone. The checkout stays
+  never `git push --tags`/`--all`/`--mirror` to it from an old clone. Commits carry the GitHub noreply
+  address (`115926360+Root-Bert@users.noreply.github.com`, `user.email` in this checkout's
+  .git/config, 2026-11-27 the user) – never a private one; Claude is no author or co-author. The checkout stays
   `~/Developer/eigen-office` (`~/Developer/slider-dev` a symlink to it). Workflows test
   `github.repository` against `eigen-hq/eigen-office` – a rename changes them too.
 - „Nur Firmen-Login“ (`workspace_sso.required`, migration 0189, 2026-11-25 the user's call): while
