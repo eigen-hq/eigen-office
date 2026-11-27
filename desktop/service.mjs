@@ -378,7 +378,7 @@ async function choosePort(paths) {
       return port;
     }
   }
-  throw new Error('Kein freier Port für Office gefunden.');
+  throw new Error('Kein freier Port für Eigen Office gefunden.');
 }
 
 // ── Start, use, leave ─────────────────────────────────────────────────────────────────────────
@@ -446,7 +446,7 @@ export async function useService({ paths, own, env, hungAfterMs = HUNG_AFTER_MS 
       }
       if (tries === 4) {
         throw new Error(
-          `Port ${guardPortOf(port)} ist belegt – läuft Office auf diesen Daten schon, oder ein anderes Programm auf diesem Port?`,
+          `Port ${guardPortOf(port)} ist belegt – läuft Eigen Office auf diesen Daten schon, oder ein anderes Programm auf diesem Port?`,
         );
       }
       await sleep(5_000);
