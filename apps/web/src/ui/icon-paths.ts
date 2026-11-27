@@ -120,6 +120,9 @@ export const iconPaths = {
   desk: 'M2 18V6h20v12h-2v-2h-4v2h-2V8H4v10H2Zm14-8h4V8h-4v2Zm0 4h4v-2h-4v2Z',
   desktopWindows:
     'M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H8v2h8v-2h-2v-2h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H3V4h18v12z',
+  /** Material Icons „tablet_mac“: the iPad or Android app (`/desktop-anmelden?app=tablet`). */
+  tabletMac:
+    'M18.5 0h-14C3.12 0 2 1.12 2 2.5v19C2 22.88 3.12 24 4.5 24h14c1.38 0 2.5-1.12 2.5-2.5v-19C21 1.12 19.88 0 18.5 0zm-7 23c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm7.5-4H4V3h15v16z',
   description:
     'M8 16h8v2H8zm0-4h8v2H8zm6-10H6c-1.1 0-2 .9-2 2v16c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z',
   // Material Symbols Rounded "difference" – the change markers of a new version.

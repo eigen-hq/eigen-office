@@ -15,7 +15,7 @@ export const DESKTOP_SCHEME = 'slider';
  * Each desktop app has a scheme of its own, so the code lands in the one that asked:
  * `/desktop-anmelden?app=cloud` hands it to Cloud (`desktop/cloud`), `app=writer` to Writer
  * (`desktop/writer`), `app=reader` to Reader (`desktop/reader`), `app=sender` to Sender
- * (`desktop/sender`).
+ * (`desktop/sender`), `app=tablet` to the iPad and Android app (`mobile/`).
  */
 export const DESKTOP_SCHEMES = {
   slider: DESKTOP_SCHEME,
@@ -23,6 +23,7 @@ export const DESKTOP_SCHEMES = {
   writer: 'slider-writer',
   reader: 'slider-reader',
   sender: 'slider-sender',
+  tablet: 'slider-tablet',
 } as const;
 export type DesktopApp = keyof typeof DESKTOP_SCHEMES;
 

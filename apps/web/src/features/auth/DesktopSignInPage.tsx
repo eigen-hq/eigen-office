@@ -19,14 +19,18 @@ export function Component() {
   // „Weiteres Konto hinzufügen“ in the app: the account goes to its pages, beside the others.
   const add = params.get('add') === '1';
   // `app=cloud` / `app=writer` / `app=reader` / `app=sender`: that app asked (`desktop/cloud`,
-  // `desktop/writer`, `desktop/reader`, `desktop/sender`), the code goes to its scheme.
+  // `desktop/writer`, `desktop/reader`, `desktop/sender`), the code goes to its scheme;
+  // `app=tablet`: the iPad or Android app (`mobile/`), all of the office.
   const asked = params.get('app');
+  const tablet = asked === 'tablet';
   const app =
     asked === 'cloud' || asked === 'writer' || asked === 'reader' || asked === 'sender'
       ? asked
       : 'slider';
-  const name = APP_NAMES[app];
-  const docTitle = `${name} Desktop | ${name}`;
+  const scheme = tablet ? 'tablet' : app;
+  const name = tablet ? 'Eigen Office' : APP_NAMES[app];
+  const device = tablet ? 'Tablet' : 'Computer';
+  const docTitle = tablet ? 'Eigen Office App | Eigen Office' : `${name} Desktop | ${name}`;
   const { data: me } = useMe();
   const [link, setLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,9 +38,9 @@ export function Component() {
 
   if (!challenge || !state) {
     return (
-      <CenteredLayout app={app} docTitle={docTitle}>
+      <CenteredLayout app={tablet ? null : app} docTitle={docTitle}>
         <CenteredCard
-          icon={<Icon name="desktopWindows" size={28} />}
+          icon={<Icon name={tablet ? 'tabletMac' : 'desktopWindows'} size={28} />}
           title="Dieser Link ist unvollständig"
           message={`Starte die Anmeldung in der ${name}-App noch einmal über „Anmelden“.`}
         />
@@ -48,7 +52,7 @@ export function Component() {
     setBusy(true);
     setError(null);
     try {
-      const target = await handCodeToDesktop(challenge, state, app);
+      const target = await handCodeToDesktop(challenge, state, scheme);
       setLink(target);
       window.location.assign(target);
     } catch (caught) {
@@ -60,7 +64,7 @@ export function Component() {
 
   if (link) {
     return (
-      <CenteredLayout app={app} docTitle={docTitle}>
+      <CenteredLayout app={tablet ? null : app} docTitle={docTitle}>
         <CenteredCard
           icon={<Icon name="checkCircle" size={28} />}
           title="Zurück zur App"
@@ -83,16 +87,16 @@ export function Component() {
   }
 
   return (
-    <CenteredLayout app={app} docTitle={docTitle}>
+    <CenteredLayout app={tablet ? null : app} docTitle={docTitle}>
       <CenteredCard
-        icon={<Icon name="desktopWindows" size={28} />}
+        icon={<Icon name={tablet ? 'tabletMac' : 'desktopWindows'} size={28} />}
         title={add ? `Konto zur ${name}-App hinzufügen` : `In der ${name}-App anmelden`}
         message={
           me?.user
             ? add
               ? `Das Konto ${me.user.name} (${me.user.email}) kommt in der App zu deinen anderen dazu.`
-              : `Die App auf deinem Computer bekommt Zugriff auf das Konto ${me.user.name}.`
-            : 'Die App auf deinem Computer bekommt Zugriff auf dein Konto.'
+              : `Die App auf deinem ${device} bekommt Zugriff auf das Konto ${me.user.name}.`
+            : `Die App auf deinem ${device} bekommt Zugriff auf dein Konto.`
         }
       >
         <div className="flex w-full flex-col gap-3">
