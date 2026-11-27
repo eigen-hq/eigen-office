@@ -3647,7 +3647,7 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
 
 - The iPad app's twin for Android tablets: one Activity (`MainActivity.kt`) with a WebView of the
   server's pages (`OfficeWebView.kt`), no Compose, no AppCompat. AGP 9.5 (its built-in Kotlin, no
-  kotlin plugin), Gradle 9.9 wrapper in the repo, compileSdk/targetSdk 37, minSdk 29, id
+  kotlin plugin), Gradle 9.9 wrapper in the repo, compileSdk/targetSdk 37, minSdk 30 (the insets code needs 30; `./gradlew :app:lintDebug` catches such – `assembleRelease` does not), id
   `dev.bertro.office`. Build with Android Studio's JDK:
   `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew assembleDebug`
   (`local.properties` with `sdk.dir` is not in git). `assembleRelease` builds unsigned – no
@@ -3661,7 +3661,7 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   localhost/127.0.0.1 (`res/xml/network.xml`).
 - Handwriting (`InkReading.kt`): ML Kit Digital Ink (`digital-ink-recognition` 19.0) reads the
   strokes themselves – the owner's yes, 2026-11-27, knowing it downloads its model from Google
-  (~20 MB per language, once; `de` → `de-DE`, prefetched when the pages open) and sends Google
+  (once per language; `de` → `de-DE`, prefetched when the pages open) and sends Google
   usage data. Strokes get made-up times (10 ms a point, 100 ms between strokes), a writing area of
   1000 × 1.5 line heights; one recognizer per language, lines read in parallel. Offline before
   the model is there: the promise rejects with a German message, the drawing stays unread. Hershey
@@ -3675,8 +3675,13 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   the page and saved to Downloads through MediaStore under the link's `download` name. Camera,
   microphone and file picker asked only for the own origin. Other sites open in the browser.
 - Not done: Pencil-like double tap (`sliderpenciltap`) and `pencilDraws` – Android has no such
-  gesture API; pen strokes come as `pointerType === 'pen'` (PenCatcher), not tried with a real
-  stylus. Chrome 145 on Android has no Handwriting Recognition API, so without the app Android
+  gesture API. Pen strokes come as `pointerType === 'pen'`, but Chrome on Android gives the touch no
+  `touchType`: PenCatcher keeps any touch while a pen is down from the page (`penDown`), else the
+  WebView scrolled and sent `pointercancel` ~10 px into a stroke begun outside a drawing (seen
+  then: the new drawing took no further strokes until a reload – not chased, gone with the fix).
+  Tried with `adb shell input stylus swipe x1 y1 x2 y2 ms` and the WebView's DevTools (`adb forward
+  tcp:29222 localabstract:webview_devtools_remote_<pid>`, Playwright `connectOverCDP`); a real
+  stylus (palm, pressure) not. Chrome 145 on Android has no Handwriting Recognition API, so without the app Android
   reads nothing.
 - Trying it on the emulator (arm64 image with Google Play services – ML Kit needs them; `Probe.kt`,
   DEBUG only, intent extras of `adb shell am start -n dev.bertro.office/.MainActivity --es …`,
@@ -3691,6 +3696,7 @@ SLIDER_LIBREOFFICE_ANSWER=later`, kill the service (back after 15 s), quit (serv
   the first Custom Tab („Stay signed out“). Tablet size: `adb shell wm size 1600x2560` and
   `wm density 320` (reset after).
 - Tried on the emulator: real Custom Tab sign-in, staying signed in after a restart, sign-out,
-  `window.sliderInk` through the page, both download kinds, the adaptive icon (Cloud.icon's layers,
-  monochrome too), a page in Bearbeiten at tablet size. Not tried: a real tablet and stylus,
+  `window.sliderInk` through the page, both download kinds, the adaptive icon (Cloud.icon's layers;
+  the themed/monochrome one not looked at), a page in Bearbeiten at tablet size, drawing with an
+  emulated stylus (anywhere and in a drawing). Not tried: a real tablet and stylus,
   camera/microphone in a call, the file picker, an https server.
