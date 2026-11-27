@@ -1748,18 +1748,23 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   are prevented (no scroll, no Scribble – the tldraw/Excalidraw way); a finger scrolls. Checked
   with a CDP pen in Chromium only; on an iPad (Scribble, Safari's scroll cancel, palm) not yet.
   Pencil double-tap/squeeze does not reach the web.
-- Handwriting read (`components/InkReader.tsx`, `lib/ink-read.ts`, API `POST
-  /documents/:id/ink-text` → `services/ink-text.ts`, feature `handwriting`): a drawing drawn in
-  this session is read 2.5 s after the pen rests – its strokes as PNGs (dark on white, cut to the
-  ink, a band per 1000 units, ≤ 8, multipart `band` parts), its own budget (`inkReads`, 30/min),
-  one read per drawing at a time, a failed one tried again after 15 s and 30 s; the words written as the `text` line with its strokes' mark (`strokesMark`), in
-  `history-merge` + `ink-read` tags (no undo step; `PageEditor` sends it in Lesen too). A sketch
-  keeps `text <mark>` with no words, so it is not read again; opening a page reads nothing.
-  „Als Text kopieren“ (ClipboardItem with a promise – Safari's gesture) and „In Text umwandeln“
-  (paragraphs under the drawing; the lasso's strokes, else all but `shape` lines – the drawing
-  goes only when nothing is left) read at once when the mark is stale; a lasso's are read alone. No AI (409):
-  nothing more asked that session. The AI and the search never see the strokes (`inkStrokeLines`
-  in shared, `documentForPrompt`, `searchText`) but do see the `text` line.
+- Handwriting read on the device only (`components/InkReader.tsx`, `lib/ink-read.ts`) – never
+  sent to a server or an AI for it (the user's call): an installed app's own recognition first –
+  it puts `window.sliderInk = { recognize(lines, languages) → Promise<string[]> }` on the page
+  (lines top down, each its strokes, each `{x, y}` points in the 1000-wide frame; the app reads
+  them with ML Kit Digital Ink or Apple's Vision; no such app exists yet) – else Chrome's
+  Handwriting Recognition API (`createHandwritingRecognizer`, a drawing per line, the page's
+  `lang`; documented for ChromeOS and English only, Android unverified). Neither: the drawing
+  stays unread, its palette has no „Als Text kopieren“/„In Text umwandeln“. Lines: pen strokes
+  drawn freehand (no marker, no `shape`), a line those whose middles lie in its height
+  (`inkLines`). Read 1 s after the pen rests, in Bearbeiten every drawing whose `text` mark is
+  stale too (drawn where nothing read it); the words go into the `text` line with its strokes'
+  mark (`strokesMark`), in `history-merge` + `ink-read` tags (no undo step; `PageEditor` sends it
+  in Lesen too). A sketch keeps `text <mark>` with no words; a stale line stays until a reading
+  device sees it. „Als Text kopieren“ (ClipboardItem with a promise – Safari's gesture) and „In
+  Text umwandeln“ (paragraphs under the drawing; the lasso's strokes, else all but `shape` lines –
+  the drawing goes only when nothing is left). The page's AI and the search never see the strokes
+  (`inkStrokeLines` in shared, `documentForPrompt`, `searchText`) but do see the `text` line.
 
 ## Diagrams – drawn files (`features/diagrams/`, `services/diagrams.ts`, `packages/shared/src/diagram.ts`)
 
