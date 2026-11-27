@@ -3292,7 +3292,8 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   (header, when the phone has `?aufgabe=` or `?termin=` open) sends that page to the desk.
 - Rest (`lib/ambient.ts`, `CompanionAmbient.tsx`): 2 min untouched with the same desk page →
   near-black overlay, big clock, one line (the kind only, no title – passers-by), shifts a few px
-  every 3 min against burn-in; a tap (swallowed) or a new desk page wakes it; never during a show,
+  every 3 min against burn-in; a tap or a new desk page wakes it – on `click`, not `pointerdown`
+  (gone on the touch, its click would hit ✕ below); never during a show,
   the AI chat or an open to-do/event panel. A web page cannot dim the screen itself.
 - Setting `users.companion` (`auto` default | `ask` | `never`), on `/einstellungen` in its own
   section „Handy als Begleiter“ and by the agents' `change_settings`. `auto` opens it on the phone only when it lies there (seen, untouched
@@ -3304,7 +3305,9 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
 - Kept on the account, so the phone sees them: the mail agent mapping and hidden calendars
   (`user_kept`, `GET/PUT /me/kept/:key`, keys in `packages/shared/src/kept.ts`, web `useKept`;
   the browser's copy is per account, an old unscoped copy goes up once only where no other account
-  is signed in; in the export as `gemerkt.json`). The workspace of `/d/`, `/t/`, `/r/`,
+  is signed in; in the export as `gemerkt.json`). `set` takes a change, not a value: sent, it is
+  applied to what the server keeps right then (GET, then PUT) – the other device's change made
+  meanwhile is not overwritten. The workspace of `/d/`, `/t/`, `/r/`,
   `/diagramm/` comes from what the page loaded (query cache, `useOpenedWorkspace`).
 - Check: web `features/companion/lib/companion.test.ts` (`viewOf`, `opensByItself`, `offered`),
   api `calls.test.ts` (hub, SSE, commands, the zombie tab), `cloud.test.ts` „opens an area …“

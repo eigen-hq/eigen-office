@@ -85,6 +85,8 @@ export function ShowBody({ show, notify }: { show: CompanionShow; notify: ShowTo
   );
 
   const ask = (action: Extract<CompanionCommand, { type: 'show' }>['action']) => {
+    // A step on its way: the next press would ask from the same slide – the computer takes one.
+    if (action !== 'black' && pending && pending.from === key) return;
     if (action !== 'black' && !show.black) {
       const to = Math.min(slides.length, Math.max(0, index + (action === 'next' ? 1 : -1)));
       if (to !== index) setPending({ from: key, to });

@@ -66,8 +66,13 @@ test('the phone beside the computer follows it, holds still while touched, opens
   await phone.page.getByRole('button', { name: 'Am Computer öffnen' }).click();
   await expect(desk).toHaveURL(new RegExp(`aufgabe=${todo.id}`), { timeout: 10_000 });
   await phone.page.keyboard.press('Escape');
+  // Left alone a moment, the phone follows the desk again.
+  await desk.goto(`/w/${ws}/dateien/kalender`);
+  await use();
+  await expect(waiting).toBeVisible({ timeout: 20_000 });
   await phone.page.clock.fastForward(25_000);
   await expect(waiting).toBeHidden();
+  await expect(phone.page.getByText('Kalender', { exact: true }).first()).toBeVisible();
 
   // A tablet is offered the companion in its header, never turned into it, never the desk.
   const tablet = await device(browser, desk, {
@@ -75,13 +80,17 @@ test('the phone beside the computer follows it, holds still while touched, opens
     isMobile: true,
     hasTouch: true,
   });
+  await tablet.context.clock.install();
   await tablet.page.goto(`/w/${ws}/dateien`);
   await expect(tablet.page.getByRole('button', { name: /^Begleiter öffnen/ })).toBeVisible({
     timeout: 20_000,
   });
-  await tablet.page.waitForTimeout(6_000);
+  // Long untouched, the desk in use: a phone would have turned by now.
+  await use();
+  await tablet.page.clock.fastForward(30_000);
+  await tablet.page.waitForTimeout(1_000);
   await expect(tablet.page).not.toHaveURL(/\/begleiter/);
-  await expect(phone.page.getByText('Aufgabe', { exact: true })).toBeVisible();
+  await expect(phone.page.getByText('Kalender', { exact: true }).first()).toBeVisible();
   expect(tablet.errors).toEqual([]);
   await tablet.context.close();
 
@@ -111,7 +120,8 @@ test('the phone beside the computer follows it, holds still while touched, opens
   await expect(black).not.toHaveAttribute('aria-pressed');
   // Not while presenting: left alone, the companion does not rest.
   await phone.page.clock.fastForward('02:30');
-  await expect(phone.page.locator('[data-companion-ambient]')).toBeHidden();
+  await phone.page.waitForTimeout(500);
+  await expect(phone.page.locator('[data-companion-ambient]')).toHaveCount(0);
   await desk.keyboard.press('Escape');
   await expect(presenter).toBeHidden();
   await expect(next).toBeHidden({ timeout: 20_000 });
@@ -121,8 +131,10 @@ test('the phone beside the computer follows it, holds still while touched, opens
   const ambient = phone.page.locator('[data-companion-ambient]');
   await expect(ambient).toBeVisible();
   await expect(ambient).toContainText('Am Computer: Präsentation');
-  await ambient.tap();
+  // Tapped where ✕ lies below: it wakes, the tap does not end the companion.
+  await ambient.tap({ position: { x: 358, y: 28 } });
   await expect(ambient).toBeHidden();
+  await expect(phone.page).toHaveURL(/\/begleiter/);
   expect(phone.errors).toEqual([]);
   await phone.context.close();
 });

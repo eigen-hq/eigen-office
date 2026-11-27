@@ -49,11 +49,9 @@ export function CompanionAmbient({
       type="button"
       aria-label="Begleiter wecken"
       data-companion-ambient
-      // Woken on the touch itself: the tap does not reach what lies below.
-      onPointerDown={(event) => {
-        event.preventDefault();
-        onWake();
-      }}
+      // Woken on the click, not the touch: gone at once, the touch's click would land on what lies
+      // below (✕, a card). Held down here, nothing below is focused either.
+      onPointerDown={(event) => event.preventDefault()}
       onClick={onWake}
       className="fixed inset-0 z-(--z-presentation) flex cursor-default flex-col items-center justify-center bg-black outline-none"
     >
