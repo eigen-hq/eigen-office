@@ -21,6 +21,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useEffectEvent, useRef } from 'react';
 import { documentLiveUrl, fetchDocument, sendDocumentEdit, writerKeys } from '@/lib/api/writer';
+import { penState } from '../lib/pen';
 import { PageSync, type PageSyncState } from '../lib/sync';
 import { PAGE_NODES, PAGE_TRANSFORMERS } from '../lib/transformers';
 import { PageAgent } from './PageAgent';
@@ -28,6 +29,7 @@ import { DiagramPlugin } from './DiagramBlock';
 import { FormatBar } from './FormatBar';
 import { InAppLinks } from './InAppLinks';
 import { usePageHost } from './PageHost';
+import { PenCatcher } from './PenCatcher';
 import { SlashMenu } from './SlashMenu';
 import './page.css';
 
@@ -82,6 +84,8 @@ export interface PageEditorProps {
   editing: boolean;
   /** Esc or ⌘↵ in Bearbeiten: back to Lesen. */
   onDone: () => void;
+  /** Bearbeiten from Lesen – the Pencil put down on the page (`PenCatcher`); absent: not to be edited. */
+  onEdit?: () => void;
   onSync?: (state: PageSyncState) => void;
   /** Shown in an empty page while it is typed in. */
   placeholder?: string;
@@ -107,7 +111,7 @@ export function PageEditor(props: PageEditorProps) {
   );
 }
 
-function PageBody({ opened, editing, onDone, onSync, placeholder }: PageEditorProps) {
+function PageBody({ opened, editing, onDone, onEdit, onSync, placeholder }: PageEditorProps) {
   const [editor] = useLexicalComposerContext();
   const host = usePageHost();
   const sync = useRef<PageSync | null>(null);
@@ -148,7 +152,8 @@ function PageBody({ opened, editing, onDone, onSync, placeholder }: PageEditorPr
   // ── Lesen and Bearbeiten ──────────────────────────────────────────────────
   useEffect(() => {
     editor.setEditable(editing);
-    if (editing) editor.focus();
+    // Bearbeiten for the Pencil's stroke: no caret, the page stays where it was touched.
+    if (editing && !penState().start) editor.focus();
     else sync.current?.flush();
   }, [editor, editing]);
 
@@ -250,6 +255,7 @@ function PageBody({ opened, editing, onDone, onSync, placeholder }: PageEditorPr
       <InAppLinks />
       <ClickableLinkPlugin />
       <MarkdownShortcutPlugin transformers={PAGE_TRANSFORMERS} />
+      <PenCatcher onEdit={onEdit} />
       {editing && <SlashMenu />}
       {editing && <DiagramPlugin />}
       {editing && <FormatBar />}

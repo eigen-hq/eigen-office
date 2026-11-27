@@ -144,6 +144,7 @@ export function PageScreen({
                 opened={opened.data}
                 editing={editing && canEdit}
                 onDone={() => setEditing(false)}
+                onEdit={canEdit ? () => setEditing(true) : undefined}
                 onSync={setSync}
               />
             </div>
