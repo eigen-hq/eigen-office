@@ -151,6 +151,26 @@ export function PenCatcher({ onEdit }: { onEdit?: () => void }) {
   const edit = useEffectEvent(() => onEdit?.());
   const canEdit = onEdit !== undefined;
 
+  // In the installed app: the Pencil draws here, the iPad's Scribble keeps out (`InkBridge`) –
+  // but for a field tapped into, which Scribble writes in.
+  useEffect(() => {
+    const bridge = window.sliderInk;
+    if (!bridge?.pencilDraws) return;
+    const inField = () => document.activeElement?.matches('input, textarea, select') ?? false;
+    const tell = () => bridge.pencilDraws?.((editor.isEditable() || canEdit) && !inField());
+    tell();
+    const off = editor.registerEditableListener(tell);
+    const later = () => setTimeout(tell);
+    document.addEventListener('focusin', tell);
+    document.addEventListener('focusout', later);
+    return () => {
+      off();
+      document.removeEventListener('focusin', tell);
+      document.removeEventListener('focusout', later);
+      bridge.pencilDraws?.(false);
+    };
+  }, [editor, canEdit]);
+
   useEffect(() => {
     if (!window.matchMedia('(any-pointer: coarse)').matches) return;
     let off = () => {};

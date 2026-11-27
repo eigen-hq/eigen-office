@@ -27,6 +27,12 @@ export type InkLine = HandwritingPoint[][];
  */
 export interface InkBridge {
   recognize(lines: readonly InkLine[], languages: readonly string[]): Promise<string[]>;
+  /**
+   * Whether the Pencil draws on what is shown (a page, `PenCatcher`): the app keeps the iPad's
+   * Scribble off meanwhile. The app answers the Pencil's double tap with `sliderpenciltap`
+   * (`lib/pen.ts`).
+   */
+  pencilDraws?(draws: boolean): void;
 }
 
 declare global {

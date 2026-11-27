@@ -26,6 +26,7 @@ import {
 } from './ink';
 import { recognize } from './shapes';
 import { inkLines } from './ink-read';
+import { pencilTap, penState, setPen } from './pen';
 import { $isCalloutNode, $isLiveBlockNode, $isPageLinkNode, $isRawBlockNode } from './nodes';
 import { PAGE_NODES } from './transformers';
 import type { Line } from './units';
@@ -513,6 +514,19 @@ describe('page codec', () => {
         ],
       ],
     ]);
+    // The Pencil's double tap (the installed app): the eraser and back to the tool before; the
+    // tool before; what the iPad may offer besides, nothing.
+    setPen({ tool: 'marker' });
+    pencilTap('eraser');
+    expect(penState().tool).toBe('eraser');
+    pencilTap('eraser');
+    expect(penState().tool).toBe('marker');
+    setPen({ tool: 'lasso' });
+    pencilTap('previous');
+    expect(penState().tool).toBe('marker');
+    pencilTap('showColorPalette');
+    expect(penState().tool).toBe('marker');
+    setPen({ tool: 'pen' });
     // Held at its end, a stroke drawn nearly straight is a line, nearly round a circle, nearly a
     // box a box; a scribble stays as drawn.
     const wobbly = Array.from({ length: 30 }, (_, at) => [at * 10, (at % 2) * 3] as const);

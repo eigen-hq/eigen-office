@@ -48,6 +48,8 @@ let state: PenState = {
   start: null,
 };
 const listeners = new Set<() => void>();
+/** The tool in hand before this one – what the Pencil's double tap goes back to. */
+let before: PenTool = 'pen';
 
 export const penState = () => state;
 
@@ -57,6 +59,7 @@ export function setPen(change: Partial<PenState> | ((now: PenState) => Partial<P
     Object.keys(next).every((key) => next[key as keyof PenState] === state[key as keyof PenState])
   )
     return;
+  if (next.tool !== state.tool) before = state.tool;
   state = next;
   for (const listener of listeners) listener();
 }
@@ -78,3 +81,20 @@ export function claimPenStart(key: NodeKey): PenStart | null {
   setPen({ start: null });
   return { ...start, points: [...start.points] };
 }
+
+/**
+ * The Pencil's double tap, as the iPad is set to answer it (the installed app sends it,
+ * `sliderpenciltap`): `eraser` – the eraser, or back from it to the tool before; `previous` – the
+ * tool before. Anything else the iPad offers (a palette) has none here.
+ */
+export function pencilTap(action: string) {
+  if (action === 'eraser')
+    setPen({ tool: state.tool === 'eraser' ? (before === 'eraser' ? 'pen' : before) : 'eraser' });
+  else if (action === 'previous') setPen({ tool: before });
+}
+
+if (typeof window !== 'undefined')
+  window.addEventListener('sliderpenciltap', (event) => {
+    const action = (event as CustomEvent<{ action?: string }>).detail?.action;
+    if (action) pencilTap(action);
+  });
