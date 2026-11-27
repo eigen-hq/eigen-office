@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { createCanvas } from '@napi-rs/canvas';
 import {
   DELETED_ACCOUNT_NAME,
+  MAX_KEPT_KEYS,
   type Author,
   type MePicture,
   type MeResponse,
@@ -54,6 +55,7 @@ import {
   workspaceInvites,
   workspaceMembers,
   workspaces,
+  userKept,
   attachments as attachmentRows,
 } from '../src/db/schema';
 import { keepAgentMessage, openAgentChat } from '../src/services/agent-chats';
@@ -276,6 +278,16 @@ describe('data export (BER-145)', () => {
     expect((await kept('mail-agents', ['a1'])).status).toBe(400);
     expect((await kept(`hidden-calendars:${ctx.workspaceId}`, ['c1', 'c2'])).status).toBe(200);
     expect((await kept('theme', 'dark')).status).toBe(404);
+    // At most MAX_KEPT_KEYS keys an account: a new one past it is refused, a kept one still changes.
+    const filler = Array.from({ length: MAX_KEPT_KEYS - 2 }, (_, i) => ({
+      userId: person.user.id,
+      key: `hidden-calendars:filler-${i}`,
+      value: [],
+    }));
+    await ctx.deps.db.insert(userKept).values(filler);
+    expect((await kept('hidden-calendars:one-more', ['c1'])).status).toBe(400);
+    expect((await kept(`hidden-calendars:${ctx.workspaceId}`, ['c1', 'c2'])).status).toBe(200);
+    await ctx.deps.db.delete(userKept).where(sql`${userKept.key} like 'hidden-calendars:filler-%'`);
     expect((await kept('theme')).status).toBe(404);
     const own = await createReadyDeck(ctx, { title: 'Annas Deck' });
     const pptxKey = blobKeys.pptx(own.deckId, own.revisionId);

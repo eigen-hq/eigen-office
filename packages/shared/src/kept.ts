@@ -13,6 +13,9 @@ export const MAX_KEPT_MAIL_AGENTS = 200;
 export const keptHiddenCalendarsKey = (workspaceId: string) => `hidden-calendars:${workspaceId}`;
 export const MAX_KEPT_HIDDEN_CALENDARS = 500;
 
+/** Keys one account keeps at most – one per workspace's calendar, so a loop of made-up ones stops. */
+export const MAX_KEPT_KEYS = 100;
+
 const keptId = z.string().min(1).max(100);
 
 export const keptMailAgentsSchema = z
