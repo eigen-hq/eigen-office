@@ -25,6 +25,10 @@ function set(next: CompanionHeard) {
   for (const listener of listeners) listener();
 }
 
+/** The stream gone this long (offline, the server away): no computer heard – none is kept. */
+const LOST_MS = 15_000;
+let lostTimer: ReturnType<typeof setTimeout> | undefined;
+
 /** The call stream said what the computer shows. */
 export function hearCompanion(event: CompanionEvent) {
   set({ ...heard, desk: event.desk });
@@ -32,7 +36,20 @@ export function hearCompanion(event: CompanionEvent) {
 
 /** The call stream (re)opened. */
 export function companionStreamOpened() {
+  clearTimeout(lostTimer);
   set({ ...heard, opened: heard.opened + 1 });
+}
+
+/**
+ * The call stream broke: what was heard of the computer counts no more unless it comes back soon
+ * (a blip reconnects and hears it again) – the phone does not keep its screen on or open the
+ * companion on an old word.
+ */
+export function companionStreamLost() {
+  clearTimeout(lostTimer);
+  lostTimer = setTimeout(() => {
+    if (heard.desk) set({ ...heard, desk: null });
+  }, LOST_MS);
 }
 
 const subscribe = (listener: () => void) => {
@@ -43,8 +60,13 @@ const subscribe = (listener: () => void) => {
 /** What the computer shows, and the stream's openings. */
 export const useCompanionHeard = (): CompanionHeard => useSyncExternalStore(subscribe, () => heard);
 
+/** What the computer shows, outside React; and listening to it (returns the stop). */
+export const companionHeard = (): CompanionHeard => heard;
+export const onCompanionHeard = (listener: () => void): (() => void) => subscribe(listener);
+
 /** For tests: back to nothing heard. */
 export function resetCompanion() {
+  clearTimeout(lostTimer);
   set({ desk: null, opened: 0 });
   setCompanionShow(null);
 }

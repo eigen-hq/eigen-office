@@ -1,6 +1,13 @@
 import type { CompanionDesk } from '@slider/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  companionHeard,
+  companionStreamLost,
+  companionStreamOpened,
+  hearCompanion,
+} from '@/lib/companion';
 import { offered, opensByItself, type AutoState } from './auto';
+import { deskShows } from './command';
 import { viewOf } from './view';
 
 const NOW = Date.parse('2026-11-27T10:00:00Z');
@@ -101,5 +108,27 @@ describe('companion', () => {
     expect(offered({ ...lying, mode: 'ask', desk: desk(false, 61 * 60_000) })).toBe(false);
     expect(offered({ ...lying, mode: 'never' })).toBe(false);
     expect(offered({ ...lying, shown: true })).toBe(false);
+
+    // „Am Computer öffnen“ counts as done once the computer shows that page (more of its own in
+    // the search is fine), not on the server's word alone.
+    const there = (path: string) => ({ ...desk(true, 0), view: { ...desk(true, 0).view, path } });
+    const todo = '/w/w1/dateien/aufgaben?aufgabe=t1';
+    expect(deskShows(there('/w/w1/dateien/aufgaben?aufgabe=t1&x=1'), todo)).toBe(true);
+    expect(deskShows(there('/w/w1/dateien/aufgaben?aufgabe=t2'), todo)).toBe(false);
+    expect(deskShows(there('/w/w1/dateien/kalender?aufgabe=t1'), todo)).toBe(false);
+    expect(deskShows(null, todo)).toBe(false);
+
+    // The stream broken: a blip keeps what was heard, a lasting break forgets the computer.
+    vi.useFakeTimers();
+    hearCompanion({ desk: desk(true, 0) });
+    companionStreamLost();
+    vi.advanceTimersByTime(10_000);
+    companionStreamOpened();
+    vi.advanceTimersByTime(10_000);
+    expect(companionHeard().desk).not.toBeNull();
+    companionStreamLost();
+    vi.advanceTimersByTime(15_000);
+    expect(companionHeard().desk).toBeNull();
+    vi.useRealTimers();
   });
 });

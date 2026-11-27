@@ -1,4 +1,4 @@
-import { DEFAULT_COMPANION_MODE } from '@slider/shared';
+import { COMPANION_RECENT_MS, DEFAULT_COMPANION_MODE } from '@slider/shared';
 import { useEffect, useRef, useState } from 'react';
 import { matchPath, useLocation, useNavigate } from 'react-router';
 import { useCallsOrNull } from '@/features/calls';
@@ -14,13 +14,27 @@ import { useReportView } from '../lib/report';
 const LOOK_MS = 5_000;
 
 /** Pages that have nothing to do with work: the companion never takes them over. */
-const OUTSIDE = ['/login', '/einrichtung', '/einladung/*', '/datenschutz', '/impressum'];
+const OUTSIDE = [
+  '/login',
+  '/registrieren',
+  '/konto-bestaetigen/:token',
+  '/anmelden/:token',
+  '/einrichtung',
+  '/join/:token',
+  '/datenschutz',
+  '/impressum',
+  '/datenanfrage',
+  '/daten/:token',
+  '/s/:token',
+];
 
 /**
  * One left the companion while the computer stayed in use: offered from then on, not opened –
  * until the computer was left a while and is used anew.
  */
 let dismissed = false;
+/** Since when no computer was heard at all (its tab reloading, a reconnect): `null` while one is. */
+let goneSince: number | null = null;
 export const dismissCompanion = () => {
   dismissed = true;
 };
@@ -32,11 +46,12 @@ export const dismissCompanion = () => {
  */
 export function CompanionWatch() {
   const kind = useDevice();
+  const mode = useMe().data?.user?.companion ?? DEFAULT_COMPANION_MODE;
   // A tablet shows like a phone (never the computer one works at); only a phone opens by itself.
-  useReportView(kind !== 'desk');
+  // „Nie“: no tab says what it shows.
+  useReportView(kind !== 'desk', mode !== 'never');
   const phone = kind === 'phone';
   const { desk } = useCompanionHeard();
-  const mode = useMe().data?.user?.companion ?? DEFAULT_COMPANION_MODE;
   const navigate = useNavigate();
   const location = useLocation();
   const calls = useCallsOrNull();
@@ -79,8 +94,14 @@ export function CompanionWatch() {
 
   useEffect(() => {
     const now = Date.now();
-    // The computer was left: next time it is used, the companion opens again.
-    if (!deskInUse(desk, now)) dismissed = false;
+    // The computer was left: next time it is used, the companion opens again. None heard (its tab
+    // reloading, a reconnect) counts only once that lasts as long.
+    if (desk) goneSince = null;
+    else goneSince ??= now;
+    const left = desk
+      ? !deskInUse(desk, now)
+      : goneSince !== null && now - goneSince >= COMPANION_RECENT_MS;
+    if (left) dismissed = false;
     const open = opensByItself({
       mode,
       desk,

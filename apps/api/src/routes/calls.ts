@@ -69,6 +69,8 @@ export function callRoutes(
   const turnWindow = fixedWindow({ limit: 1_500, windowMs: HOUR_MS, clock: deps.clock });
   // A talk of an hour stepped on from the phone: a few hundred steps.
   const commandWindow = fixedWindow({ limit: 1_200, windowMs: HOUR_MS, clock: deps.clock });
+  // Each tab says it on every change, settled, and once a minute while in use.
+  const reportWindow = fixedWindow({ limit: 3_000, windowMs: HOUR_MS, clock: deps.clock });
   const lives = createMiddleware<ViewerEnv>(async (c, next) => {
     assertWithinLimit(
       c,
@@ -312,7 +314,13 @@ export function callRoutes(
       })
       /** What this tab is (phone or desk), whether it is in front, and what its page is about. */
       .post('/calls/companion', viewer, async (c) => {
-        companion.report(me(c).id, await readJson(c, companionReportSchema));
+        const userId = me(c).id;
+        assertWithinLimit(
+          c,
+          reportWindow.hit(userId),
+          'Zu viele Meldungen. Bitte warte einen Moment.',
+        );
+        companion.report(userId, await readJson(c, companionReportSchema));
         return c.body(null, 204);
       })
       /**
@@ -327,7 +335,14 @@ export function callRoutes(
           'Zu viele Schritte vom Handy. Bitte warte einen Moment.',
         );
         const { command } = await readJson(c, z.object({ command: companionCommandSchema }));
-        if (!companion.command(userId, command)) throw notFound('Kein Computer verbunden.');
+        const asked = companion.command(userId, command);
+        if (asked === 'none') throw notFound('Kein Computer verbunden.');
+        if (asked === 'busy')
+          throw new ApiError(
+            409,
+            'bad_request',
+            'Am Computer läuft gerade eine Präsentation oder ein Anruf.',
+          );
         return c.body(null, 204);
       })
   );

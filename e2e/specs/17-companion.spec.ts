@@ -65,6 +65,8 @@ test('the phone beside the computer follows it, holds still while touched, opens
   await expect(waiting).toBeVisible({ timeout: 20_000 });
   await phone.page.getByRole('button', { name: 'Am Computer öffnen' }).click();
   await expect(desk).toHaveURL(new RegExp(`aufgabe=${todo.id}`), { timeout: 10_000 });
+  // Said done once the computer shows it, not on the server's word.
+  await expect(phone.page.getByText('Am Computer geöffnet.')).toBeVisible({ timeout: 10_000 });
   await phone.page.keyboard.press('Escape');
   // Left alone a moment, the phone follows the desk again.
   await desk.goto(`/w/${ws}/dateien/kalender`);

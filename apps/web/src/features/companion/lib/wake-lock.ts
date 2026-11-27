@@ -10,8 +10,11 @@ export function useWakeLock(on: boolean): void {
     if (!on || typeof navigator === 'undefined' || !('wakeLock' in navigator)) return;
     let lock: WakeLockSentinel | null = null;
     let live = true;
+    // Asked and not answered yet: not asked twice (the second lock would never be let go).
+    let asking = false;
     const take = () => {
-      if (document.visibilityState !== 'visible' || (lock && !lock.released)) return;
+      if (asking || document.visibilityState !== 'visible' || (lock && !lock.released)) return;
+      asking = true;
       navigator.wakeLock
         .request('screen')
         .then((taken) => {
@@ -19,7 +22,10 @@ export function useWakeLock(on: boolean): void {
           else void taken.release().catch(() => undefined);
         })
         // Refused (low battery, no gesture yet on some browsers): the next time the tab is seen.
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          asking = false;
+        });
     };
     take();
     document.addEventListener('visibilitychange', take);

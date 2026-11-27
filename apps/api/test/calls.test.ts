@@ -227,6 +227,15 @@ describe('Calls – in a conversation, heard on every page', () => {
     await vi.waitFor(() => expect(annas.commands).toEqual([step]));
     expect(annasPhone.commands).toEqual([]);
     expect((await command({ type: 'open', path: '/w/x/dateien' })).status).toBe(204);
+    // A page is not opened over the show or a call there (the phone hears why); steps still go.
+    await report('anna-tab-0001', {
+      device: 'desk',
+      active: false,
+      busy: true,
+      view: { ...view, show },
+    });
+    expect((await command({ type: 'open', path: '/w/x/dateien' })).status).toBe(409);
+    expect((await command(step)).status).toBe(204);
     // Only the app's own addresses, only steps and pages – and only to one's own computer.
     for (const path of ['//evil.example', 'https://evil.example', '/\\evil.example'])
       expect((await command({ type: 'open', path })).status).toBe(400);
@@ -254,14 +263,27 @@ describe('Calls – in a conversation, heard on every page', () => {
     expect(hub.deskOf('u')?.view.id).toBe('thread-1');
     leaveZombie();
     expect(hub.deskOf('u')).toBeNull();
-    expect(hub.command('u', { type: 'open', path: '/w/x' })).toBe(false);
+    expect(hub.command('u', { type: 'open', path: '/w/x' })).toBe('none');
     // A stream that dropped and came back (same tab): the old one's late leave keeps the new.
     const leaveOld = hub.connect('u', 'back', () => {}, answers);
     hub.report('u', { peerId: 'back', device: 'desk', active: true, view });
     hub.connect('u', 'back', () => {}, answers);
     leaveOld();
     expect(hub.deskOf('u')?.view.id).toBe('thread-1');
-    expect(hub.command('u', { type: 'open', path: '/w/x' })).toBe(true);
+    expect(hub.command('u', { type: 'open', path: '/w/x' })).toBe('sent');
+    // Reports of tabs whose stream never comes: a few kept, the oldest give way; long unheard
+    // ones are forgotten, the person with them once none is left.
+    const many = new CompanionHub(() => at);
+    for (let n = 0; n < 25; n += 1) {
+      at += 1;
+      many.report('v', { peerId: `tab-${n}`, device: 'desk', active: true, view });
+    }
+    expect(
+      (many as unknown as { people: Map<string, Map<string, unknown>> }).people.get('v')?.size,
+    ).toBe(20);
+    at += 3 * 60_000;
+    expect(many.deskOf('v')).toBeNull();
+    expect((many as unknown as { people: Map<string, unknown> }).people.has('v')).toBe(false);
 
     // Ben answers: he connects to Anna's tab; it rings no more.
     const answered = (await (

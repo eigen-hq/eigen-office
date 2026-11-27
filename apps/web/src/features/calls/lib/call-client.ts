@@ -16,7 +16,12 @@ import {
 import { api, ApiError, apiRequest } from '@/lib/api-client';
 import { Levels } from './levels';
 import { callHere } from '@/lib/call-here';
-import { companionStreamOpened, hearCompanion, hearCompanionCommand } from '@/lib/companion';
+import {
+  companionStreamLost,
+  companionStreamOpened,
+  hearCompanion,
+  hearCompanionCommand,
+} from '@/lib/companion';
 import type { CallListener } from './listener';
 import { camera, MediaRefused, microphone, screen } from './media';
 import { Mesh, type RemoteMedia, type Slot, type Transport } from './mesh';
@@ -173,6 +178,7 @@ export class CallClient {
     });
     stream.addEventListener('open', () => companionStreamOpened());
     stream.addEventListener('error', () => {
+      if (this.source === stream) companionStreamLost();
       if (stream.readyState !== EventSource.CLOSED || this.source !== stream) return;
       this.timer = window.setTimeout(() => this.openStream(), RECONNECT_MS);
     });

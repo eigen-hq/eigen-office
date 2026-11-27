@@ -132,9 +132,10 @@ function useOpenFromPhone(on: boolean, busy: boolean) {
  * Every signed-in tab tells the server what it is (phone or desk), whether one works at it and –
  * a desk – what its page is about, on every change and after every reconnect of its stream
  * (`POST /calls/companion`). A desk's page: from its address, its title and its lines for the
- * agent (`useCallHere`).
+ * agent (`useCallHere`). `on: false` („Nie“): nothing of the page is said – only that it shows
+ * nothing (a page said before is taken back).
  */
-export function useReportView(phone: boolean) {
+export function useReportView(phone: boolean, on = true) {
   const calls = useCallsOrNull();
   const peerId = calls?.snap.peerId ?? null;
   const signedIn = !!calls?.snap.me;
@@ -142,9 +143,10 @@ export function useReportView(phone: boolean) {
   const location = useLocation();
   const workspace = useActiveWorkspace();
   const openedWorkspace = useOpenedWorkspace(location.pathname);
-  const inUse = useInUse(!phone && signedIn);
+  const inUse = useInUse(!phone && signedIn && on);
   const show = useCompanionShow();
-  useOpenFromPhone(!phone && signedIn, !!show || !!calls?.snap.active);
+  const busy = !!show || !!calls?.snap.active;
+  useOpenFromPhone(!phone && signedIn && on, busy);
   const [lines, setLines] = useState(ownCallHere);
   const [title, setTitle] = useState(() => (typeof document === 'undefined' ? '' : pageTitle()));
 
@@ -160,20 +162,27 @@ export function useReportView(phone: boolean) {
     return () => watcher.disconnect();
   }, []);
 
-  const page: CompanionView | null = phone
-    ? null
-    : viewOf(
-        location.pathname,
-        location.search,
-        title,
-        lines,
-        openedWorkspace ?? workspace?.id ?? null,
-      );
+  const page: CompanionView | null =
+    phone || !on
+      ? null
+      : viewOf(
+          location.pathname,
+          location.search,
+          title,
+          lines,
+          openedWorkspace ?? workspace?.id ?? null,
+        );
   // A slide show of the deck open here: where it is, for the phone's presenter view.
   const view =
     page && show && page.kind === 'deck' && page.id === show.deckId ? { ...page, show } : page;
   const report: CompanionReport | null = peerId
-    ? { peerId, device: phone ? 'phone' : 'desk', active: phone ? false : inUse, view }
+    ? {
+        peerId,
+        device: phone ? 'phone' : 'desk',
+        active: !phone && on && inUse,
+        ...(!phone && on && busy && { busy: true }),
+        view,
+      }
     : null;
   const key = report && JSON.stringify(report);
   const told = useRef<string | null>(null);

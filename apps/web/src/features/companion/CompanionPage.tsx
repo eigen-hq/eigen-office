@@ -20,7 +20,7 @@ import { CompanionAmbient } from './components/CompanionAmbient';
 import { ASKS_ITSELF, CompanionBody } from './components/CompanionBodies';
 import { deskThere } from './lib/auto';
 import { useAmbient } from './lib/ambient';
-import { askDesk } from './lib/command';
+import { openAtDesk } from './lib/command';
 import { useHeldView } from './lib/hold';
 import { CompanionTitle } from './lib/title';
 import { useWakeLock } from './lib/wake-lock';
@@ -180,12 +180,7 @@ function OpenOnDesk({ workspaceId, notify }: { workspaceId: string; notify: Show
       icon="desktopWindows"
       label="Am Computer öffnen"
       variant="ghost"
-      onClick={() =>
-        void askDesk({ type: 'open', path }, notify).then((sent) => {
-          // Not seen here: said where it happened.
-          if (sent) notify('Am Computer geöffnet.');
-        })
-      }
+      onClick={() => void openAtDesk(path, notify)}
     />
   );
 }

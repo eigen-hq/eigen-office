@@ -57,6 +57,11 @@ export const companionShowSchema = z.object({
   black: z.boolean(),
   /** When the show began (ISO) – the phone's stopwatch. */
   startedAt: z.iso.datetime(),
+  /**
+   * The slides the show steps through, as the computer fixed them when it began (a slide hidden or
+   * added meanwhile does not change them) – the phone's next slide and notes follow these.
+   */
+  slideIds: z.array(z.string().min(1).max(200)).max(1000).optional(),
 });
 export type CompanionShow = z.infer<typeof companionShowSchema>;
 
@@ -114,6 +119,11 @@ export const companionReportSchema = z.object({
   device: z.enum(['phone', 'desk']),
   /** The tab is the one in front (visible and focused). */
   active: z.boolean(),
+  /**
+   * A slide show or a call runs in the tab: a page asked from the phone does not open there
+   * (refused, the phone says so) – a show's own steps still go.
+   */
+  busy: z.boolean().optional(),
   /** What the page is about – desks only; `null` on a phone. */
   view: companionViewSchema.nullable(),
 });

@@ -15,6 +15,8 @@ interface Tab {
   ask: ((command: CompanionCommand) => boolean) | null;
   device: CompanionReport['device'];
   active: boolean;
+  /** A slide show or a call runs there: no page opened from the phone. */
+  busy: boolean;
   /** When it was last in front or changed its page. */
   at: number;
   /** When it last reported – in use or presenting count only while it keeps saying so. */
@@ -27,6 +29,12 @@ const LIVE_MS = COMPANION_REFRESH_MS * 1.5;
 
 /** A report without its stream is forgotten after this long (the stream never came). */
 const UNSTREAMED_MS = 2 * 60_000;
+
+/** Tabs kept per person: a new one beyond takes the place of the oldest without its stream. */
+const MAX_TABS = 20;
+
+/** What became of a command from the phone. */
+export type CompanionAsked = 'sent' | 'none' | 'busy';
 
 /**
  * The phone beside the computer („Begleiter“): every tab says what it is (phone or desk), whether
@@ -56,6 +64,7 @@ export class CompanionHub {
       ask: null,
       device: 'desk',
       active: false,
+      busy: false,
       at: this.now(),
       toldAt: this.now(),
       view: null,
@@ -79,6 +88,7 @@ export class CompanionHub {
   report(userId: string, report: CompanionReport) {
     const tabs = this.tabsOf(userId);
     const before = tabs.get(report.peerId);
+    if (!before && tabs.size >= MAX_TABS && !this.makeRoom(tabs)) return;
     const view = report.device === 'desk' ? report.view : null;
     const moved =
       !before ||
@@ -90,6 +100,7 @@ export class CompanionHub {
     Object.assign(tab, {
       device: report.device,
       active: report.active,
+      busy: !!report.busy,
       at: moved || report.active ? now : tab.at,
       toldAt: now,
       view,
@@ -122,16 +133,28 @@ export class CompanionHub {
 
   /**
    * Hands the phone's command to the one computer tab it shows (`deskOf`) – of the same person,
-   * never another tab. `false`: no computer of theirs is there.
+   * never another tab. `none`: no computer of theirs is there; `busy`: a page is not opened over
+   * the slide show or call running there.
    */
-  command(userId: string, command: CompanionCommand): boolean {
+  command(userId: string, command: CompanionCommand): CompanionAsked {
     const tab = this.deskTab(userId);
-    if (!tab?.ask) return false;
+    if (!tab?.ask) return 'none';
+    if (command.type === 'open' && tab.busy) return 'busy';
     try {
-      return tab.ask(command);
+      return tab.ask(command) ? 'sent' : 'none';
     } catch {
-      return false;
+      return 'none';
     }
+  }
+
+  /** The oldest report without its stream goes; `false`: every tab has its stream. */
+  private makeRoom(tabs: Map<string, Tab>): boolean {
+    let oldest: [string, Tab] | null = null;
+    for (const entry of tabs) {
+      if (!entry[1].send && (!oldest || entry[1].toldAt < oldest[1].toldAt)) oldest = entry;
+    }
+    if (oldest) tabs.delete(oldest[0]);
+    return !!oldest;
   }
 
   /**
@@ -142,10 +165,12 @@ export class CompanionHub {
     const now = this.now();
     let best: Tab | null = null;
     // Read, not made: a person without tabs is not kept in memory for asking.
-    for (const [peerId, tab] of this.people.get(userId) ?? []) {
+    const tabs = this.people.get(userId);
+    for (const [peerId, tab] of tabs ?? []) {
       // A report whose stream never came (the tab went before it opened) – forgotten.
-      if (!tab.send && now - tab.at > UNSTREAMED_MS) {
-        this.people.get(userId)?.delete(peerId);
+      if (!tab.send && now - tab.toldAt > UNSTREAMED_MS) {
+        tabs?.delete(peerId);
+        if (tabs?.size === 0) this.people.delete(userId);
         continue;
       }
       if (tab.device !== 'desk' || !tab.view || !tab.send) continue;
