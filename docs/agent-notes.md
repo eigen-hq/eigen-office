@@ -3251,8 +3251,10 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
 
 - The phone beside the computer shows what goes with the computer's page at `/begleiter`: mail →
   „KI zur Mail“ (`MailAside`), chat → its agents, calendar → the event / the day's column, file →
-  preview + Verlauf, deck → the slide shown + its open comments, Writer/Reader → comments, anything
-  else → coming events + own to-dos. Below it the workspace's AI (`CompanionChat`, Cloud's chat
+  preview + Verlauf (a page `/dateien/seite/:id` or diagram `/diagramm/:id` too), to-do
+  (`?aufgabe=`) → its card (tapped: its panel on the phone), area chat without a channel → the
+  area's first channel, deck → the slide shown + its open comments (during a slide show: the
+  presenter remote, below), Writer/Reader → comments, anything else → coming events + own to-dos. Below it the workspace's AI (`CompanionChat`, Cloud's chat
   with `here`) and the call button in the header; mail and calendar have their own „Nachfragen“,
   so no field below there (`ASKS_ITSELF`).
 - Wire: every tab (`CompanionWatch`, in `router.tsx`) posts `POST /calls/companion`
@@ -3260,9 +3262,37 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   debounced); `CompanionHub` (memory) keeps the newest desktop per user and sends SSE
   `companion` on the existing `/calls/live`. `view` comes
   from the path (`lib/view.ts` `viewOf`) plus the page's call-here lines (`ownCallHere`) – so the
-  agent on the phone knows what the computer shows. Phone = coarse pointer and narrow; the desk is
-  „active“ with its tab in front and input in the last 2 min (`COMPANION_RECENT_MS`), „there“ for
-  60 min (`COMPANION_GONE_MS`).
+  agent on the phone knows what the computer shows. The desk is „active“ with its tab in front and
+  input in the last 2 min (`COMPANION_RECENT_MS`), „there“ for 60 min (`COMPANION_GONE_MS`).
+  The hub is in memory: one API process (a second one would split the tabs).
+- `lib/device.ts`: phone = coarse pointer and small (< 768 wide or < 500 high); tablet = coarse
+  pointer, bigger, no `any-pointer: fine` → reports as phone (never the desk) and is only offered
+  the companion (`CompanionButton`), never opened by itself; anything else is a desk.
+- A dead tab's stream is noticed only when a write fails – behind a proxy (the Vite dev proxy
+  holds the upstream; seen in e2e) or with a lid closed that can take minutes. So „active“ and a
+  running show count only while the tab keeps saying it: a desk in use or presenting re-posts its
+  unchanged report every `COMPANION_REFRESH_MS` (60 s), the hub drops both after 1.5× that
+  (`live()` in `services/companion.ts`). Without it a zombie that last said „active“ outranked the
+  tab really worked at once that one went idle.
+- Back channel: the phone posts `POST /calls/companion/command` (`companionCommandSchema`: a show
+  step `{type:'show', deckId, action: next|prev|black, from: slideId}` or `{type:'open', path}`);
+  the hub hands it to the one desk tab the phone shows (`deskTab`), SSE `companion-command`; 404
+  when no desk; 1200/h. `path` must be the app's own (`companionPathSchema`: starts with one `/`,
+  not `//` or `/\`) – checked on both sides; the desk ignores `open` while a show or call runs.
+- Slide show remote: `PresentationMode` and `PresenterView` call `useShowRemote` (`show-hooks.ts`):
+  publish `{deckId, slideId, ended, black, startedAt}` into `lib/companion.ts` (`setCompanionShow`),
+  `report.ts` adds it to the deck's view and posts show changes without the settle delay. A step is
+  applied only if `from` is the slide shown (idempotent, a double tap does not skip two). The phone
+  (`CompanionShow.tsx`) lists slides with `showSlidesOf` (same order/hidden/variants as the show),
+  steps optimistically (forgotten after 2.5 s if the desk did not move), notes A−/A+ kept per
+  browser (`slider.companion.notesSize`). A show ranks above „active“ and keeps the desk in use.
+- Touched, it holds still (`lib/hold.ts`): while the phone was touched in the last 20 s
+  (`BUSY_MS`) a new desk page waits in a bar „Am Computer: … | Zeigen“; „Am Computer öffnen“
+  (header, when the phone has `?aufgabe=` or `?termin=` open) sends that page to the desk.
+- Rest (`lib/ambient.ts`, `CompanionAmbient.tsx`): 2 min untouched with the same desk page →
+  near-black overlay, big clock, one line (the kind only, no title – passers-by), shifts a few px
+  every 3 min against burn-in; a tap (swallowed) or a new desk page wakes it; never during a show,
+  the AI chat or an open to-do/event panel. A web page cannot dim the screen itself.
 - Setting `users.companion` (`auto` default | `ask` | `never`), on `/einstellungen` in its own
   section „Handy als Begleiter“ and by the agents' `change_settings`. `auto` opens it on the phone only when it lies there (seen, untouched
   20 s, no field focused, no call) and the computer is in use, not again after ✕ until the computer
@@ -3270,13 +3300,17 @@ in it away – the panel was invisible. Arranging, Sender's scrollers get 20 px 
   left of the date in the header on a phone, green dot while the computer is in use – no pop-up.
 - Screen Wake Lock (`lib/wake-lock.ts`) only while the computer is there; re-taken on
   `visibilitychange` (browsers drop it when hidden). Needs https (localhost counts).
-- Per browser, not shown on the phone unless set there: the mail agent mapping
-  (`slider.mail.agents`) and hidden calendars. A deck's workspace is the last-used one (`/d/:id`
-  has none in its path); an area chat without a channel id shows the default body.
+- Kept on the account, so the phone sees them: the mail agent mapping and hidden calendars
+  (`user_kept`, `GET/PUT /me/kept/:key`, keys in `packages/shared/src/kept.ts`, web `useKept`;
+  the browser's copy is per account, an old unscoped copy goes up once only where no other account
+  is signed in; in the export as `gemerkt.json`). The workspace of `/d/`, `/t/`, `/r/`,
+  `/diagramm/` comes from what the page loaded (query cache, `useOpenedWorkspace`).
 - Check: web `features/companion/lib/companion.test.ts` (`viewOf`, `opensByItself`, `offered`),
-  api `calls.test.ts` (hub, SSE), `cloud.test.ts` „opens an area …“ (`here` in the prompt),
-  `account-data.test.ts` (setting, export); by hand two browsers – one at phone size
-  (coarse pointer) – signed in as the same person.
+  api `calls.test.ts` (hub, SSE, commands, the zombie tab), `cloud.test.ts` „opens an area …“
+  (`here` in the prompt), `account-data.test.ts` (setting, kept, export); e2e
+  `17-companion.spec.ts` (desk + phone + tablet contexts; the phone's waits via
+  `context.clock.install()` + `fastForward`, ~15 s). Other agents' edits reload the e2e dev server
+  (HMR) – a long real-time wait there is flaky, use the clock.
 
 ## Hosted instance – office.bertro.dev, formerly slider.bertro.dev
 
