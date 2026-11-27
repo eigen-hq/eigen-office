@@ -304,9 +304,9 @@ test('a page reads first, Bearbeiten writes back only what changed; areas open o
     await page.mouse.move(sheetBox.x + 40 + step * 20, sheetBox.y + 80 + (step % 2) * 30);
   }
   await page.mouse.up();
-  await expect(sheet.locator('path')).toHaveCount(1);
+  await expect(sheet.locator('.page-ink-stroke')).toHaveCount(1);
   await page.getByRole('button', { name: 'Fertig' }).click();
-  await expect(page.locator('.page-ink path')).toHaveCount(1);
+  await expect(page.locator('.page-ink .page-ink-stroke')).toHaveCount(1);
   await page
     .getByRole('navigation', { name: 'Pfad' })
     .getByRole('link', { name: 'Seiten' })
@@ -321,7 +321,7 @@ test('a page reads first, Bearbeiten writes back only what changed; areas open o
   await shot(page, 'own-home');
   await home.getByRole('link', { name: 'Einkauf' }).first().click();
   await expect(page).toHaveURL(/\/seite\//);
-  await expect(page.locator('.page-ink path')).toHaveCount(1);
+  await expect(page.locator('.page-ink .page-ink-stroke')).toHaveCount(1);
   await page
     .getByRole('navigation', { name: 'Pfad' })
     .getByRole('link', { name: 'Seiten' })

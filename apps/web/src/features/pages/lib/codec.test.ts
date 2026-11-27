@@ -10,7 +10,21 @@ import { $createCodeNode } from '@lexical/code-core';
 import { $createListItemNode, type ListItemNode } from '@lexical/list';
 import { describe, expect, it } from 'vitest';
 import { $pageMarkdown, PageCodec } from './codec';
-import { addStrokes, parseInk, parseStroke, removeLines, setHeight, strokeLines } from './ink';
+import {
+  addStrokes,
+  lassoHolds,
+  liftInk,
+  parseInk,
+  parseStroke,
+  removeLines,
+  replaceStrokes,
+  setHeight,
+  setTranscript,
+  strokeLines,
+  strokesMark,
+  wipePoints,
+} from './ink';
+import { recognize } from './shapes';
 import { $isCalloutNode, $isLiveBlockNode, $isPageLinkNode, $isRawBlockNode } from './nodes';
 import { PAGE_NODES } from './transformers';
 import type { Line } from './units';
@@ -363,7 +377,7 @@ describe('page codec', () => {
     expect(drawnInk.map((line) => line.text)).toEqual([
       '```ink 300',
       'pen text 4 10 10 20 20',
-      'marker yellow 22 5 5 50 6',
+      'draw marker yellow 22 5 5 0 50 6 0',
       '```',
       '',
       'Nach',
@@ -379,7 +393,7 @@ describe('page codec', () => {
     ]);
     const ink = parseInk(drawnInk.map((line) => line.text).join('\n'));
     expect(ink.height).toBe(300);
-    expect(ink.strokes.map(({ line }) => line)).toEqual([1, 2]);
+    expect(ink.strokes.map(({ lines }) => lines)).toEqual([[1], [2]]);
     expect(
       removeLines(
         drawnInk
@@ -388,17 +402,115 @@ describe('page codec', () => {
           .join('\n'),
         new Set([1]),
       ),
-    ).toBe('```ink 300\nmarker yellow 22 5 5 50 6\n```');
+    ).toBe('```ink 300\ndraw marker yellow 22 5 5 0 50 6 0\n```');
+    // The pen's press is kept per point (1–100), a mouse's stroke without; a stroke longer than a
+    // line holds goes on in `more` lines – one stroke still, wiped whole.
+    expect(parseStroke('draw pen red 5 1 2 50 3 4 0')?.points).toEqual([
+      [1, 2, 0.5],
+      [3, 4],
+    ]);
     const long = strokeLines({
       tool: 'pen',
       color: 'text',
       width: 4,
-      points: Array.from({ length: 1600 }, (_, at) => [at, at] as const),
+      points: Array.from({ length: 2400 }, (_, at) => [at, at, 0.5] as const),
     });
     expect(long).toHaveLength(2);
-    expect(long[1]!.startsWith('pen text 4 1499 1499 1500 1500')).toBe(true);
+    expect(long[1]!.startsWith('more ')).toBe(true);
     expect(long.every((line) => line.length < 20_000)).toBe(true);
+    const longInk = ['```ink 300', 'pen text 4 10 10 20 20', ...long, '```'].join('\n');
+    const longParsed = parseInk(longInk);
+    expect(longParsed.strokes.map(({ lines }) => lines)).toEqual([[1], [2, 3]]);
+    expect(longParsed.strokes[1]!.stroke.points).toHaveLength(2400);
+    expect(replaceStrokes(longInk, new Map([[1, []]]))).toBe(
+      '```ink 300\npen text 4 10 10 20 20\n```',
+    );
     expect(parseStroke('pen text 4 1 2 3')).toBeNull();
+    expect(parseStroke('draw pen text 4 1 2 3 4')).toBeNull();
+    // A form drawn true is its corners; what the handwriting says is a line of its own, before
+    // the fence – new strokes go above it, its mark says which strokes it was read from.
+    expect(parseStroke('shape pen blue 4 0 0 100 0')).toEqual({
+      tool: 'pen',
+      color: 'blue',
+      width: 4,
+      points: [
+        [0, 0],
+        [100, 0],
+      ],
+      exact: true,
+    });
+    const said = setTranscript('```ink 300\npen text 4 10 10 20 20\n```', 'abc', 'Milch\n Eier ');
+    expect(said).toBe('```ink 300\npen text 4 10 10 20 20\ntext abc Milch / Eier\n```');
+    expect(parseInk(said).transcript).toEqual({ line: 2, mark: 'abc', text: 'Milch / Eier' });
+    expect(addStrokes(said, [{ ...stroke, points: [...stroke.points] }]).split('\n')[2]).toMatch(
+      /^draw /,
+    );
+    expect(setTranscript(said, 'abc', '')).toBe('```ink 300\npen text 4 10 10 20 20\n```');
+    expect(strokesMark(parseInk(said))).not.toBe(
+      strokesMark(parseInk(addStrokes(said, [{ ...stroke, points: [...stroke.points] }]))),
+    );
+    // The precise eraser cuts a stroke in two; the lasso holds what lies inside its loop.
+    const line = {
+      tool: 'pen',
+      color: 'text',
+      width: 2,
+      points: [0, 10, 20, 30, 40].map((x) => [x, 0] as const),
+    } as const;
+    expect(
+      wipePoints({ ...line, points: [...line.points] }, [20, 0], 3).map(
+        (piece) => piece.points.length,
+      ),
+    ).toEqual([2, 2]);
+    const loop = [
+      [-5, -5],
+      [15, -5],
+      [15, 5],
+      [-5, 5],
+    ] as const;
+    expect(lassoHolds({ ...line, points: [...line.points] }, [...loop])).toBe(false);
+    expect(lassoHolds({ ...line, points: line.points.slice(0, 3) }, [...loop])).toBe(true);
+    // Drawn on just above a drawing: its strokes move down, the drawing grows by as much.
+    const lifted = parseInk(liftInk('```ink 300\npen text 4 10 10 20 20\n```', 40));
+    expect(lifted.height).toBe(340);
+    expect(lifted.strokes[0]!.stroke.points[0]).toEqual([10, 50]);
+    // Held at its end, a stroke drawn nearly straight is a line, nearly round a circle, nearly a
+    // box a box; a scribble stays as drawn.
+    const wobbly = Array.from({ length: 30 }, (_, at) => [at * 10, (at % 2) * 3] as const);
+    const straight = recognize(wobbly)!;
+    expect(straight).toHaveLength(2);
+    expect(straight[1]![1]).toBeCloseTo(0);
+    expect(straight[1]![0]).toBeCloseTo(290, 0);
+    const round = Array.from({ length: 60 }, (_, at) => {
+      const t = (at / 59) * Math.PI * 2;
+      return [200 + Math.cos(t) * (100 + (at % 3)), 200 + Math.sin(t) * (98 + (at % 2))] as const;
+    });
+    const circle = recognize(round)!;
+    expect(circle.length).toBeGreaterThan(30);
+    expect(Math.abs(Math.hypot(circle[5]![0] - 200, circle[5]![1] - 200) - 100)).toBeLessThan(4);
+    const edge = (from: readonly [number, number], to: readonly [number, number]) =>
+      Array.from(
+        { length: 10 },
+        (_, at) =>
+          [
+            from[0] + ((to[0] - from[0]) * at) / 10 + (at % 2),
+            from[1] + ((to[1] - from[1]) * at) / 10,
+          ] as const,
+      );
+    const boxed = recognize([
+      ...edge([0, 0], [200, 2]),
+      ...edge([200, 2], [201, 120]),
+      ...edge([201, 120], [1, 118]),
+      ...edge([1, 118], [0, 4]),
+    ]);
+    expect(boxed).toHaveLength(5);
+    expect(boxed![2]![0]).toBeCloseTo(201, -1);
+    expect(boxed![2]![1]).toBe(120);
+    expect(boxed![0]).toEqual(boxed![4]);
+    const scribble = Array.from(
+      { length: 80 },
+      (_, at) => [at * 4 + Math.sin(at) * 30, Math.cos(at * 1.7) * 40] as const,
+    );
+    expect(recognize(scribble)).toBeNull();
     expect(setHeight('```ink 300\n```', 540)).toBe('```ink 540\n```');
   });
 });

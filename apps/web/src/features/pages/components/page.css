@@ -643,29 +643,76 @@ a.page-diagram-embed:hover {
   position: relative;
   border-radius: 8px;
   border: 1px solid var(--color-hairline);
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+.page-ink-active {
+  border-color: var(--color-hairline-strong);
   background: var(--color-canvas);
 }
 .page-ink-editing .page-ink-surface {
   /* A finger scrolls the page; the pen and the mouse draw. */
   touch-action: pan-y pinch-zoom;
   cursor: crosshair;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .page-ink-editing .page-ink-eraser {
   cursor: cell;
 }
+.page-ink-editing .page-ink-lasso {
+  cursor: default;
+}
+/* The tools float just above the drawing drawn in (as Apple's palette) – no room taken, nothing
+   jumps, the sheet free to draw on – and stay in sight while it is scrolled through. */
 .page-ink-bar {
   position: sticky;
-  top: 8px;
-  z-index: 1;
+  /* Its tools (40px high) hang above it: stuck, they stand 6px under the top. */
+  top: 46px;
+  z-index: 2;
+  height: 0;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px;
+  align-items: flex-start;
+  justify-content: flex-end;
+  overflow: visible;
 }
-.page-ink-pick {
-  flex: 1;
-  align-self: stretch;
-  border-radius: 6px;
+.page-ink-tools {
+  flex-wrap: wrap;
+  max-width: 100%;
+  transform: translateY(calc(-100% - 6px));
+}
+.page-ink-live {
+  pointer-events: none;
+}
+.page-ink-loop {
+  fill: color-mix(in srgb, var(--color-fg) 4%, transparent);
+  stroke: var(--color-fg-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.page-ink-box {
+  fill: none;
+  stroke: var(--color-fg-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.page-ink-lasso .page-ink-box {
+  cursor: move;
+}
+.page-ink-held {
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--color-fg) 35%, transparent));
+}
+.page-ink-hover {
+  stroke: var(--color-fg-muted);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+  transition: opacity 0.1s;
 }
 .page-ink-grip {
   height: 14px;
@@ -673,7 +720,8 @@ a.page-diagram-embed:hover {
   border-radius: 0 0 8px 8px;
   cursor: ns-resize;
   touch-action: none;
-  background: linear-gradient(var(--color-hairline-strong), var(--color-hairline-strong)) center / 40px 3px no-repeat;
+  background: linear-gradient(var(--color-hairline-strong), var(--color-hairline-strong)) center /
+    40px 3px no-repeat;
   opacity: 0.6;
 }
 .page-ink-grip:hover {
