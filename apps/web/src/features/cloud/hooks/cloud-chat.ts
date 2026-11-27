@@ -11,6 +11,8 @@ import { useAgentChat, type Chat } from '@/features/viewer';
 export interface ChatPlace {
   folderId?: string | null;
   areaId?: string | null;
+  /** Asked from the phone beside the computer: what the computer shows (`features/companion`). */
+  here?: string | null;
 }
 
 /** The workspace's open chat: sending, stopping, beginning anew; refusals go to `refused`. */
@@ -31,6 +33,7 @@ export function useCloudChat(
           history,
           folderId: place.folderId ?? null,
           areaId: place.areaId ?? null,
+          ...(place.here ? { here: place.here } : {}),
         },
         onEvent,
         signal,

@@ -6,6 +6,7 @@ import {
   type MaterialChatEvent,
 } from './material-chat';
 import { attachmentIdsSchema, attachmentSchema, MAX_ATTACHMENTS } from './attachments';
+import { MAX_CALL_HERE } from './calls';
 
 /*
  * The AI in Cloud (✨ beside the files): one person's chat with the workspace's AI in a side
@@ -33,6 +34,11 @@ export const cloudChatInputSchema = z.object({
   /** Where the person is: the open folder, or the area whose top is open. */
   folderId: z.string().min(1).max(100).nullable().optional(),
   areaId: z.string().min(1).max(100).nullable().optional(),
+  /**
+   * Asked from the phone beside the computer (`features/companion`): what the computer's page
+   * shows (its `useCallHere` lines) – „das hier“, „diese Mail“ mean that.
+   */
+  here: z.string().max(MAX_CALL_HERE).optional(),
 });
 export type CloudChatInput = z.input<typeof cloudChatInputSchema>;
 

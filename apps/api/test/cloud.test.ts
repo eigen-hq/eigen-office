@@ -657,8 +657,10 @@ describe('Cloud – the workspace’s files', () => {
     let made = '';
     let panelTools: string[] = [];
     let elsewhere: string[] = [];
+    let system = '';
     answers = [
       (body) => {
+        system = JSON.stringify((body as { system?: unknown }).system);
         panelTools = ((body as { tools?: { name: string }[] }).tools ?? []).map((t) => t.name);
         return {
           stop_reason: 'tool_use',
@@ -700,10 +702,18 @@ describe('Cloud – the workspace’s files', () => {
     ];
     const tidied = await chat(
       'Räum hier auf',
-      { areaId: sales.id, history: [{ role: 'assistant', text: 'Hallo' }] },
+      {
+        areaId: sales.id,
+        history: [{ role: 'assistant', text: 'Hallo' }],
+        // Asked from the phone beside the computer: what the computer shows, one line each.
+        here: 'Mail: Angebot Frühjahr\u0007\nVon: Müller GmbH',
+      },
       anna.cookie,
     );
     expect(tidied.text).toBe('Aufgeräumt.');
+    expect(system).toContain('has the area „Vertrieb“ open');
+    expect(system).toContain('from their phone beside the computer');
+    expect(system).toContain('Mail: Angebot Frühjahr\\nVon: Müller GmbH');
     expect(tidied.events.map((event) => event.type)).toEqual(
       expect.arrayContaining(['reading', 'changed', 'text', 'done']),
     );
