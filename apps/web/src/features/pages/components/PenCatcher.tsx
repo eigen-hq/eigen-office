@@ -160,10 +160,15 @@ export function PenCatcher({ onEdit }: { onEdit?: () => void }) {
     const tell = () => bridge.pencilDraws?.((editor.isEditable() || canEdit) && !inField());
     tell();
     const off = editor.registerEditableListener(tell);
-    const later = () => setTimeout(tell);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const later = () => {
+      clearTimeout(timer);
+      timer = setTimeout(tell);
+    };
     document.addEventListener('focusin', tell);
     document.addEventListener('focusout', later);
     return () => {
+      clearTimeout(timer);
       off();
       document.removeEventListener('focusin', tell);
       document.removeEventListener('focusout', later);
@@ -208,6 +213,7 @@ export function PenCatcher({ onEdit }: { onEdit?: () => void }) {
         let toUnits: ((point: Client) => InkPoint) | null = null;
         let begun = false;
         let done = false;
+        let cancelled = false;
 
         const push = (point: Client) => {
           if (start && toUnits && penState().start === start) start.points.push(toUnits(point));
@@ -242,6 +248,8 @@ export function PenCatcher({ onEdit }: { onEdit?: () => void }) {
           begun = true;
           const plan = planFor(editor, root, down.y);
           const go = () => {
+            // Cancelled while Bearbeiten was coming: nothing is put on the page.
+            if (cancelled) return;
             const key = place(editor, plan);
             if (key) requestAnimationFrame(() => land(key, plan));
             else stop();
@@ -279,8 +287,9 @@ export function PenCatcher({ onEdit }: { onEdit?: () => void }) {
         const onUp = (up: PointerEvent) => {
           if (up.pointerId !== id) return;
           if (!begun) {
-            stop();
+            // Before `stop()`: it lets go of `held`, which says the click is ours to make.
             tap(up);
+            stop();
             return;
           }
           done = true;
@@ -290,7 +299,10 @@ export function PenCatcher({ onEdit }: { onEdit?: () => void }) {
 
         const onCancel = (cancel: PointerEvent) => {
           if (cancel.pointerId !== id) return;
-          if (start && penState().start === start) setPen({ start: null });
+          cancelled = true;
+          const pending = penState().start;
+          if (pending && (pending === start || (pending.key === null && pending.pointerId === id)))
+            setPen({ start: null });
           stop();
         };
 
