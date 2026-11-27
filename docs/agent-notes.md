@@ -630,7 +630,7 @@ one setting for all.
   app and the tools that mean presentations („Slider's AI“, the card's „In Slider öffnen“); the
   OAuth scope `slider` and the token prefixes stay (protocol, connections made); code identifiers, env vars, packages, docker and the self-hosting
   docs keep „Slider“ as the project's name. System mails (`inviteMail`, `mail/mailer.ts`): without
-  `app` the head is the word „Office“ alone (no picture) and the text ends „– Office“; with `app`
+  `app` the head is the words „Eigen Office“ alone (no picture) and the text ends „– Eigen Office“; with `app`
   (a presentation's mails – shared deck, sent export, unused deck – are `slider`) the app's mark
   travels inline (`cid:<app>-logo`, PNGs 72 px wide in `mail/logo.ts`, the Cloud/Writer/Reader/
   Sender ones drawn by Chrome from `features/cloud/assets/<app>-mark.svg`) beside its name. The
@@ -638,6 +638,19 @@ one setting for all.
   (über Slider)“). In code „office“ otherwise means LibreOffice or an office file (`officePreviewable`,
   `office-fonts`). Left from before: `/office` still leads to `/cloud` (`router.tsx`, `OLD_START`),
   the usage feature is still `office` (rows in the database).
+  Since 2026-11-27 (the user: „eigen office ist jetzt der name also office von eigen. eigen ist das
+  unternehmen“) the family's name is „Eigen Office“ – Eigen is the company. Every use above that
+  means the software, the instance or the account now says „Eigen Office“, compounds with hyphens
+  („Eigen-Office-Instanz“, „Eigen-Office-Server“, „Eigen-Office-Adresse“, „Eigen-Office-App“):
+  setup, sign-in, system mails (head and „– Eigen Office“), the privacy template, the passkey's RP
+  name, `DEVICE_NAME` (Nextcloud shows „Eigen Office (<host>)“; app passwords made before are
+  „Office“ or „Slider“, the remove hint names both), the OAuth `client_name` and `clientInfo`
+  towards foreign MCP servers, our connector's `serverInfo` title, `resource_name`, the 401, the
+  instructions and „Search Eigen Office“, the AI's prompts, the calendar feed's `PRODID`, the
+  desktop guard's and desktop service's errors. Still „Office“: the built-in fonts („Office“/
+  „Office-Schriften“), LibreOffice, Microsoft Office, office files, the Linux desktop category, and
+  every machine value (`serverInfo` name `office`, `claude mcp add … office`, the usage feature,
+  `/office`). The website and docs say „Eigen Office“ too.
   Repository and checkout (2026-11-27, the user: one public repo, worked on directly): the only
   repository is the public `eigen-hq/eigen-office` (remote `origin`), started at release 0.1.0 =
   1.6.18's code as one commit by „Slider“ – versions count from 0.1.0 again, a 1.x desktop app
