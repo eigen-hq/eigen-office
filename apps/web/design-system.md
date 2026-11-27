@@ -122,6 +122,7 @@ white-on-colour spots listed in §12 (count bubbles, slide chrome, brand marks).
 | `pointer-rim`          | Featured card hover: 1px border lit around the pointer                |
 | `draw-in`              | SVG line drawn in like the comment connectors (`pathLength={1}`)      |
 | `skeleton`             | Shimmering loading placeholder                                        |
+| `ai-scan-wash`         | AI at work: a sage band sweeping; 2px under „Agenten“ (side bar)      |
 | `scrollbar-none`       | Hidden scrollbar                                                      |
 
 The `ring-*` utilities and the glass utilities each set `box-shadow`; never stack two of them on
