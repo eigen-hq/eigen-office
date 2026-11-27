@@ -56,3 +56,6 @@ export { PersonFace } from './components/PersonFace';
 export { usePinAction } from './hooks/usePinAction';
 export { ROW_MENU_CLASS, useRowMenu } from './hooks/useRowMenu';
 export { MutedMark, PinnedMark } from './components/PinnedMark';
+// The phone beside the computer (`features/companion`): a chat's agents, „KI zur Mail“.
+export { ChatAgents } from './components/ChatAside';
+export { MailAside } from './components/mail/MailAside';

@@ -17,20 +17,25 @@ import {
 import { api } from '@/lib/api-client';
 import { useCallHere } from '@/lib/call-here';
 import { CLOUD_EVENT_PARAM } from '@/lib/routes';
-import { AsidePart, FileIcon } from '@/features/cloud';
-import { ActivityFeed } from '@/features/cloud/components/ActivityFeed';
-import { hasPagePreview, PagePreview } from '@/features/cloud/components/PagePreview';
-import { CalendarAside } from '@/features/cloud/components/calendar/CalendarAside';
-import { useHiddenCalendars } from '@/features/cloud/components/calendar/CalendarList';
-import { UpcomingEvents } from '@/features/cloud/components/calendar/UpcomingEvents';
-import { at, clock, dayFormat, todayNoon } from '@/features/cloud/components/calendar/days';
-import { useCalendarSource } from '@/features/cloud/components/calendar/sources';
-import { useBusyDays } from '@/features/cloud/components/calendar/useBusyDays';
-import { MyTodos } from '@/features/cloud/components/todos/TodoList';
-import { useSenderOrNull } from '@/features/sender';
-import { ChatAgents } from '@/features/sender/components/ChatAside';
-import { MailAside } from '@/features/sender/components/mail/MailAside';
-import { SlideThumbnail } from '@/features/reviews/components/SlideThumbnail';
+import {
+  ActivityFeed,
+  AsidePart,
+  at,
+  CalendarAside,
+  clock,
+  dayFormat,
+  FileIcon,
+  hasPagePreview,
+  MyTodos,
+  PagePreview,
+  todayNoon,
+  UpcomingEvents,
+  useBusyDays,
+  useCalendarSource,
+  useHiddenCalendars,
+} from '@/features/cloud';
+import { SlideThumbnail } from '@/features/reviews';
+import { ChatAgents, MailAside, useSenderOrNull } from '@/features/sender';
 import { buildThreads, CommentPreview } from '@/features/viewer';
 import { Avatar, Icon, type ShowToast } from '@/ui';
 import { useCompanionTitle } from '../lib/title';

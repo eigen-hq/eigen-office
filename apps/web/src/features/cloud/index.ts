@@ -67,3 +67,14 @@ export {
 } from './home/frame';
 export type { BoardKit, WidgetInfo } from './home/kit';
 export { SHARED_DEFAULTS, useHomeLayout, type BoardSpec, type WidgetDefaults } from './home/layout';
+// The phone beside the computer (`features/companion`) shows Cloud's parts as Cloud does.
+export { ActivityFeed } from './components/ActivityFeed';
+export { hasPagePreview, PagePreview } from './components/PagePreview';
+export { CalendarAside } from './components/calendar/CalendarAside';
+export { useHiddenCalendars } from './components/calendar/CalendarList';
+export { UpcomingEvents } from './components/calendar/UpcomingEvents';
+export { at, clock, dayFormat, todayNoon } from './components/calendar/days';
+export { useCalendarSource } from './components/calendar/sources';
+export { useBusyDays } from './components/calendar/useBusyDays';
+export { EventPanel } from './components/calendar/EventPanel';
+export { MyTodos, TodoPanel } from './components/todos/TodoList';

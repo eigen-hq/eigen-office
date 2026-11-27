@@ -17,8 +17,9 @@ const INPUT_EVERY_MS = 5_000;
 /** The person works at this tab: it is in front and was used a moment ago. */
 function useInUse(on: boolean): boolean {
   const front = useInFront();
+  // Opened counts as used; each use starts the time anew.
   const [usedAt, setUsedAt] = useState(() => Date.now());
-  const [, setTick] = useState(0);
+  const [recent, setRecent] = useState(true);
   useEffect(() => {
     if (!on) return;
     let last = 0;
@@ -27,6 +28,7 @@ function useInUse(on: boolean): boolean {
       if (now - last < INPUT_EVERY_MS) return;
       last = now;
       setUsedAt(now);
+      setRecent(true);
     };
     const events = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'scroll'] as const;
     for (const event of events)
@@ -37,14 +39,14 @@ function useInUse(on: boolean): boolean {
   }, [on]);
   // Unused for a while: no longer in use – said once the time ran out.
   useEffect(() => {
-    if (!on || !front) return;
+    if (!on) return;
     const timer = window.setTimeout(
-      () => setTick((now) => now + 1),
-      Math.max(0, usedAt + COMPANION_RECENT_MS - Date.now()) + 50,
+      () => setRecent(false),
+      Math.max(0, usedAt + COMPANION_RECENT_MS - Date.now()),
     );
     return () => window.clearTimeout(timer);
-  }, [on, front, usedAt]);
-  return front && Date.now() - usedAt < COMPANION_RECENT_MS;
+  }, [on, usedAt]);
+  return front && recent;
 }
 
 /**
