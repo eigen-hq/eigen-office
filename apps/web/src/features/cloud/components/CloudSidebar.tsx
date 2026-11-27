@@ -303,24 +303,13 @@ function AgentsGroup() {
       {toggles &&
         !closed &&
         agents.map((agent) => (
-          <NavLink
+          // The same row as its chat's below – dropped files, its menu, what is unread.
+          <ChatRow
             key={agent.id}
+            chat={agent}
             to={sender?.agentPath(agent.id) ?? routes.cloudAgent(ui.workspace.id, agent.id)}
-            title={agent.title}
-            aria-current={false}
-            className={cn(rowClass({ isActive: false }), 'pl-[26px]')}
-          >
-            <AgentFace
-              agent={agent}
-              size={18}
-              showArea
-              areas={ui.home?.areas}
-              workspace={ui.workspace}
-              working
-              className="rounded-mark"
-            />
-            <span className="min-w-0 flex-1 truncate">{agent.title}</span>
-          </NavLink>
+            indent
+          />
         ))}
       {toggles && !closed && asks.map((ask) => <AskRow key={ask.id} ask={ask} />)}
     </div>
@@ -593,9 +582,12 @@ function AreaRow({
 function ChatRow({
   chat,
   to,
+  indent = false,
 }: {
   chat: SenderChannel | SenderAgent | MailThreadSummary;
   to: string;
+  /** Under a row it belongs to („Agenten“'s running ones). */
+  indent?: boolean;
 }) {
   const ui = useCloud();
   const folded = use(Folded);
@@ -673,6 +665,7 @@ function ChatRow({
             'h-8 shrink-0',
             unread && !state.isActive && 'font-semibold text-fg',
             folded && foldedRow,
+            indent && 'pl-[26px]',
             ROW_MENU_CLASS,
             drop.over && overClass,
           )
