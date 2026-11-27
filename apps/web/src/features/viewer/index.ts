@@ -25,6 +25,10 @@ export { editsUnsentBeforeSignOut, installEditOutbox } from './editing/edit-outb
 // The last run through a deck („Letzter Durchgang“ in the deck's menu).
 export { useShowRun, useShowRuns, type ShowRun } from './presentation/lib/show-runs';
 export { SummaryLine, SummaryRows } from './presentation/RunSummary';
+// A show stepped on from the phone beside the computer (`features/companion`).
+export { showSlidesOf } from './presentation/lib/presentation';
+export { formatElapsed } from './presentation/lib/show-sync';
+export { notesFromText, notesToHtml } from './timeline/lib/notes-html';
 // What is typed into a creation prompt, kept in this browser (Folie 1, and Neue Präsentation).
 export {
   clearCreationDraft,

@@ -27,6 +27,7 @@ import {
   useShowClock,
   useShowFullscreen,
   useShowKeys,
+  useShowRemote,
   useShowMessages,
   useWakeLock,
 } from './show-hooks';
@@ -163,6 +164,14 @@ export function PresentationMode({
     toggleBlack: () => setBlack((on) => !on),
     exit,
     clear: boxes.clear,
+  });
+  useShowRemote({
+    deckId: deck.id,
+    slideId: current?.id ?? null,
+    ended,
+    black,
+    step,
+    toggleBlack: () => setBlack((on) => !on),
   });
 
   // The audience's window: where the presenter view moves, it follows – and the other way round.

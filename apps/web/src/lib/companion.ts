@@ -1,4 +1,9 @@
-import type { CompanionDesk, CompanionEvent } from '@slider/shared';
+import type {
+  CompanionCommand,
+  CompanionDesk,
+  CompanionEvent,
+  CompanionShow,
+} from '@slider/shared';
 import { useSyncExternalStore } from 'react';
 
 /**
@@ -41,4 +46,45 @@ export const useCompanionHeard = (): CompanionHeard => useSyncExternalStore(subs
 /** For tests: back to nothing heard. */
 export function resetCompanion() {
   set({ desk: null, opened: 0 });
+  setCompanionShow(null);
 }
+
+/*
+ * What the phone asks of this tab (event `companion-command`, only to the computer tab it shows):
+ * heard by whoever can do it – a slide show running (`useShowRemote`), the page („Am Computer
+ * öffnen“, `useCompanionCommands`).
+ */
+const asked = new Set<(command: CompanionCommand) => void>();
+
+/** The call stream handed this tab a command. */
+export function hearCompanionCommand(command: CompanionCommand) {
+  for (const listener of asked) listener(command);
+}
+
+/** Listens to the phone's commands; returns the stop. */
+export function onCompanionCommand(listener: (command: CompanionCommand) => void): () => void {
+  asked.add(listener);
+  return () => asked.delete(listener);
+}
+
+/*
+ * A slide show running in this tab: where it is, told to the phone with the page
+ * (`features/companion/lib/report.ts`). Set by the show, `null` once it ends.
+ */
+let show: CompanionShow | null = null;
+const showListeners = new Set<() => void>();
+
+export function setCompanionShow(next: CompanionShow | null) {
+  if (JSON.stringify(next) === JSON.stringify(show)) return;
+  show = next;
+  for (const listener of showListeners) listener();
+}
+
+const subscribeShow = (listener: () => void) => {
+  showListeners.add(listener);
+  return () => showListeners.delete(listener);
+};
+
+/** The slide show running in this tab, if one is. */
+export const useCompanionShow = (): CompanionShow | null =>
+  useSyncExternalStore(subscribeShow, () => show);

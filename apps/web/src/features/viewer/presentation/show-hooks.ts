@@ -8,8 +8,10 @@ import {
   useState,
   type RefObject,
 } from 'react';
+import type { CompanionCommand } from '@slider/shared';
 import { useSearchParams } from 'react-router';
 import { useCommandKeyClaim } from '@/features/commands';
+import { onCompanionCommand, setCompanionShow } from '@/lib/companion';
 import { presentationKey } from './lib/presentation';
 import type { SlideMark } from './lib/show-times';
 import {
@@ -100,6 +102,41 @@ export function useShowKeys(handlers: ShowKeyHandlers) {
     window.addEventListener('keydown', listener, { capture: true });
     return () => window.removeEventListener('keydown', listener, { capture: true });
   }, []);
+}
+
+/**
+ * The phone beside the computer steps the show on (`features/companion`): where the show is goes
+ * up with the page, and its „Weiter“, „Zurück“ and „Schwarz“ come back here – taken only while the
+ * show still stands where the phone saw it (pressed twice, or heard by the audience's window too:
+ * once). A step goes as a key's would (transitions, black first).
+ */
+export function useShowRemote({
+  deckId,
+  slideId,
+  ended,
+  black,
+  step,
+  toggleBlack,
+}: {
+  deckId: string;
+  slideId: string | null;
+  ended: boolean;
+  black: boolean;
+  step: (by: 1 | -1) => void;
+  toggleBlack: () => void;
+}) {
+  const [startedAt] = useState(() => new Date().toISOString());
+  const shownId = ended ? null : slideId;
+  useEffect(() => {
+    setCompanionShow({ deckId, slideId: shownId, ended, black, startedAt });
+  }, [deckId, shownId, ended, black, startedAt]);
+  useEffect(() => () => setCompanionShow(null), []);
+  const onCommand = useEffectEvent((command: CompanionCommand) => {
+    if (command.type !== 'show' || command.deckId !== deckId || command.from !== shownId) return;
+    if (command.action === 'black') toggleBlack();
+    else step(command.action === 'next' ? 1 : -1);
+  });
+  useEffect(() => onCompanionCommand((command) => onCommand(command)), []);
 }
 
 /**

@@ -8,13 +8,15 @@ import {
   type CallState,
   type CompanionEvent,
   type VoiceLive,
+  COMPANION_COMMAND_SSE_EVENT,
   COMPANION_SSE_EVENT,
+  companionCommandSchema,
   MAX_CALL_UTTERANCE,
 } from '@slider/shared';
 import { api, ApiError, apiRequest } from '@/lib/api-client';
 import { Levels } from './levels';
 import { callHere } from '@/lib/call-here';
-import { companionStreamOpened, hearCompanion } from '@/lib/companion';
+import { companionStreamOpened, hearCompanion, hearCompanionCommand } from '@/lib/companion';
 import type { CallListener } from './listener';
 import { camera, MediaRefused, microphone, screen } from './media';
 import { Mesh, type RemoteMedia, type Slot, type Transport } from './mesh';
@@ -156,6 +158,17 @@ export class CallClient {
         hearCompanion(JSON.parse((message as MessageEvent<string>).data) as CompanionEvent);
       } catch (error) {
         console.error('Companion: an event could not be handled', error);
+      }
+    });
+    // What the phone asks of this tab: checked again here, whatever the server let through.
+    stream.addEventListener(COMPANION_COMMAND_SSE_EVENT, (message) => {
+      try {
+        const command = companionCommandSchema.safeParse(
+          JSON.parse((message as MessageEvent<string>).data),
+        );
+        if (command.success) hearCompanionCommand(command.data);
+      } catch (error) {
+        console.error('Companion: a command could not be handled', error);
       }
     });
     stream.addEventListener('open', () => companionStreamOpened());

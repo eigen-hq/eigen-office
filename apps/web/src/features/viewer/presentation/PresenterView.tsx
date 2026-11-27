@@ -40,6 +40,7 @@ import {
   useShowChannel,
   useShowFullscreen,
   useShowKeys,
+  useShowRemote,
   useShowClock,
   useShowMessages,
   useWakeLock,
@@ -111,6 +112,14 @@ export function PresenterView({ startSlideId, onExit }: PresenterViewProps) {
     toggleBlack: () => setBlack((on) => !on),
     exit,
     clear: boxes.clear,
+  });
+  useShowRemote({
+    deckId: deck.id,
+    slideId: current?.id ?? null,
+    ended,
+    black,
+    step,
+    toggleBlack: () => setBlack((on) => !on),
   });
 
   // A step taken on the audience's message is not told back (rapid steps would bounce).

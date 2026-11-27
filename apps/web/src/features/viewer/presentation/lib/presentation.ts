@@ -24,6 +24,17 @@ export function presentedSlides(slides: readonly Slide[]): Slide[] {
 }
 
 /**
+ * The slides a show steps through, from the deck's as loaded (`useSlides`) – in their order,
+ * without variants (as the viewer), the hidden ones left out: the phone beside the computer counts
+ * as the show does.
+ */
+export function showSlidesOf(loaded: readonly Slide[]): Slide[] {
+  const sorted = [...loaded].sort((a, b) => a.position - b.position);
+  const ids = new Set(sorted.map((slide) => slide.id));
+  return presentedSlides(sorted.filter((slide) => !(slide.variantOf && ids.has(slide.variantOf))));
+}
+
+/**
  * Where the presentation starts: on the active slide – a hidden one hands over to the next one
  * shown, at the end of the deck to the one before.
  */
