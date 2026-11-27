@@ -112,6 +112,7 @@ export function useShowKeys(handlers: ShowKeyHandlers) {
  */
 export function useShowRemote({
   deckId,
+  slides,
   slideId,
   ended,
   black,
@@ -119,6 +120,8 @@ export function useShowRemote({
   toggleBlack,
 }: {
   deckId: string;
+  /** The slides the show steps through, as fixed when it began. */
+  slides: readonly { id: string }[];
   slideId: string | null;
   ended: boolean;
   black: boolean;
@@ -127,9 +130,11 @@ export function useShowRemote({
 }) {
   const [startedAt] = useState(() => new Date().toISOString());
   const shownId = ended ? null : slideId;
+  const ids = slides.map((slide) => slide.id).join('\n');
   useEffect(() => {
-    setCompanionShow({ deckId, slideId: shownId, ended, black, startedAt });
-  }, [deckId, shownId, ended, black, startedAt]);
+    const slideIds = ids ? ids.split('\n') : [];
+    setCompanionShow({ deckId, slideId: shownId, ended, black, startedAt, slideIds });
+  }, [deckId, shownId, ended, black, startedAt, ids]);
   useEffect(() => () => setCompanionShow(null), []);
   const onCommand = useEffectEvent((command: CompanionCommand) => {
     if (command.type !== 'show' || command.deckId !== deckId || command.from !== shownId) return;

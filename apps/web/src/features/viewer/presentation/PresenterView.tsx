@@ -115,6 +115,7 @@ export function PresenterView({ startSlideId, onExit }: PresenterViewProps) {
   });
   useShowRemote({
     deckId: deck.id,
+    slides,
     slideId: current?.id ?? null,
     ended,
     black,

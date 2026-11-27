@@ -167,6 +167,7 @@ export function PresentationMode({
   });
   useShowRemote({
     deckId: deck.id,
+    slides,
     slideId: current?.id ?? null,
     ended,
     black,

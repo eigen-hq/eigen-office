@@ -37,7 +37,19 @@ function useSecond() {
 
 export function ShowBody({ show, notify }: { show: CompanionShow; notify: ShowToast }) {
   const loaded = useSlides(show.deckId);
-  const slides = useMemo(() => showSlidesOf(loaded.data ?? []), [loaded.data]);
+  // As the computer fixed them when the show began (a slide hidden or added since changes nothing
+  // there); from the deck as loaded only where the computer did not say.
+  const slideIds = show.slideIds?.join('\n');
+  const slides = useMemo(() => {
+    const live = loaded.data ?? [];
+    if (slideIds === undefined) return showSlidesOf(live);
+    const byId = new Map(live.map((slide) => [slide.id, slide]));
+    return slideIds.split('\n').flatMap((id) => byId.get(id) ?? []);
+  }, [loaded.data, slideIds]);
+  // The presenter view and the audience's window each began their own: the time since the first.
+  const [began, setBegan] = useState({ deckId: show.deckId, at: show.startedAt });
+  if (began.deckId !== show.deckId || Date.parse(show.startedAt) < Date.parse(began.at))
+    setBegan({ deckId: show.deckId, at: show.startedAt });
   const notes = useDeckNotes(show.deckId);
   const now = useSecond();
   const [size, setSize] = useState(() =>
@@ -107,7 +119,7 @@ export function ShowBody({ show, notify }: { show: CompanionShow; notify: ShowTo
       <div className="flex items-center justify-between text-caption text-fg-muted tabular-nums">
         <span>{ended ? 'Ende' : `Folie ${index + 1} / ${slides.length}`}</span>
         <span className="text-body font-semibold text-fg">
-          {formatElapsed(now - Date.parse(show.startedAt))}
+          {formatElapsed(now - Date.parse(began.at))}
         </span>
         <span>{clockFormat.format(now)}</span>
       </div>
