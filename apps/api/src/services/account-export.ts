@@ -99,7 +99,7 @@ import { agentMessagesWhere, type AgentMessageRow } from './agent-chats';
  */
 const EXPORTS_AT_ONCE = 2;
 const MAX_EXPORT_FILE_BYTES = 1024 ** 3;
-const LEFT_OUT = 'Zu groß für dieses Archiv. In Office lässt sich die Datei einzeln herunterladen.';
+const LEFT_OUT = 'Zu groß für dieses Archiv. In Eigen Office lässt sich die Datei einzeln herunterladen.';
 const running = new WeakMap<object, Set<string>>();
 
 export async function exportAccount(
@@ -1343,7 +1343,7 @@ const safeName = (name: string) =>
     .slice(-100)
     .trim() || 'praesentation.pptx';
 
-const README = `Deine Daten aus Office
+const README = `Deine Daten aus Eigen Office
 
 konto.json            Profil (dein Bild in profilbild.jpg), Anmeldewege, Passkeys, verbundene Nextcloud-Konten, KI-Apps, Sitzungen, Workspaces, Verbindungen, Bereiche, Angepinntes (in der Cloud und im Sender), Favoriten, zuletzt Geöffnetes, Unterhaltungen im Sender, Wörter für Workspaces
 praesentationen.json  Präsentationen, die dir gehören; die Originaldateien liegen in praesentationen/
