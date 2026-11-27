@@ -1,5 +1,12 @@
 import type { AccentColor } from '@slider/shared';
-import { $createParagraphNode, $createTextNode, $getNodeByKey, type NodeKey } from 'lexical';
+import {
+  $createParagraphNode,
+  $createTextNode,
+  $getNodeByKey,
+  ElementNode,
+  type LexicalNode,
+  type NodeKey,
+} from 'lexical';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { accentColor, ACCENT_COLOR_NAMES } from '@/lib/accent';
 import { isTextTarget } from '@/lib/dom';
@@ -46,7 +53,7 @@ import {
   type PenStart,
   type PenTool,
 } from '../lib/pen';
-import { readInkNow } from '../lib/ink-read';
+import { readInkNow, readStrokesNow } from '../lib/ink-read';
 import { recognize } from '../lib/shapes';
 import { usePageHost } from './PageHost';
 import { useBlockPick } from './useBlockPick';
@@ -613,11 +620,19 @@ export function InkBlock({ text, nodeKey }: { text: string; nodeKey: NodeKey }) 
   const [reading, setReading] = useState(false);
   const hasInk = ink.strokes.length > 0;
   /** The words, line by line – `null` (told) when there are none or they could not be read. */
+  /** The lasso's strokes, or the drawing whole. */
   const words = async (): Promise<string | null> => {
     setReading(true);
-    const said = await readInkNow(editor, nodeKey).finally(() => setReading(false));
+    const said = await (
+      held.length > 0 ? readStrokesNow(editor, held) : readInkNow(editor, nodeKey)
+    ).finally(() => setReading(false));
     if (said === null) host.notify('Die Handschrift ließ sich nicht lesen.', 'danger');
-    else if (!said.trim()) host.notify('In dieser Zeichnung steht kein Text.');
+    else if (!said.trim())
+      host.notify(
+        held.length > 0
+          ? 'In der Auswahl steht kein Text.'
+          : 'In dieser Zeichnung steht kein Text.',
+      );
     return said?.trim() ? said.trim() : null;
   };
   const copyText = () => {
@@ -638,22 +653,34 @@ export function InkBlock({ text, nodeKey }: { text: string; nodeKey: NodeKey }) 
       })
       .catch(() => host.notify('Der Text ließ sich nicht kopieren.', 'danger'));
   };
+  /**
+   * The words as lines of text under the drawing, their strokes gone: the lasso's, or all but the
+   * forms drawn true (boxes, arrows stay). Nothing left, the drawing goes.
+   */
   const toText = async () => {
+    const chosen = new Set(held.map((entry) => entry.key));
     const said = await words();
     if (said === null) return;
     editor.update(() => {
       const node = $getNodeByKey(nodeKey);
       if (!$isRawBlockNode(node)) return;
-      const lines = said.split('\n').filter((line) => line.trim());
-      let last = null;
-      for (const line of lines) {
+      const now = node.getText();
+      const strokes = parseInk(now).strokes;
+      const gone = new Map<number, readonly InkStroke[]>();
+      strokes.forEach((entry, index) => {
+        if (chosen.size > 0 ? chosen.has(entry.key) : !entry.stroke.exact) gone.set(index, []);
+      });
+      let at: LexicalNode = node;
+      for (const line of said.split('\n').filter((each) => each.trim())) {
         const paragraph = $createParagraphNode().append($createTextNode(line.trim()));
-        node.insertBefore(paragraph);
-        last = paragraph;
+        at.insertAfter(paragraph);
+        at = paragraph;
       }
-      node.remove();
-      last?.selectEnd();
+      if (at !== node && at instanceof ElementNode) at.selectEnd();
+      if (gone.size === strokes.length) node.remove();
+      else node.setText(replaceStrokes(now, gone));
     });
+    setSelection(NONE);
     setPen({ at: null });
   };
 

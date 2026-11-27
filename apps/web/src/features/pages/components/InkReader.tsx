@@ -1,10 +1,16 @@
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getNodeByKey, $getRoot, HISTORY_MERGE_TAG, type NodeKey } from 'lexical';
+import {
+  $getNodeByKey,
+  $getRoot,
+  HISTORY_MERGE_TAG,
+  type EditorState,
+  type NodeKey,
+} from 'lexical';
 import { useEffect } from 'react';
 import { ApiError } from '@/lib/api-client';
 import { readDocumentInk } from '@/lib/api/writer';
-import { isInkFence, parseInk, setTranscript, strokesMark } from '../lib/ink';
-import { INK_READ_TAG, inkPicture, readers } from '../lib/ink-read';
+import { isInkFence, parseInk, setTranscript, strokesMark, type InkEntry } from '../lib/ink';
+import { INK_READ_TAG, inkPictures, readers } from '../lib/ink-read';
 import { $isRawBlockNode } from '../lib/nodes';
 
 /*
@@ -24,14 +30,36 @@ export function InkReader({ documentId }: { documentId: string }) {
   useEffect(() => {
     const timers = new Map<NodeKey, number>();
     const seen = new Map<NodeKey, string>();
+    /** A drawing being read: asked again, it waits for that first. */
+    const busy = new Map<NodeKey, Promise<string | null>>();
+    /** Failed reads (offline, too many) of each drawing, tried again a little later. */
+    const failed = new Map<NodeKey, number>();
     let gone = false;
     /** No AI for the workspace: nothing more is asked this time. */
     let off = false;
 
-    const read = async (key: NodeKey): Promise<string | null> => {
-      window.clearTimeout(timers.get(key));
-      timers.delete(key);
+    /** What the strokes say, asked of the AI; `null`: not to be read now. */
+    const ask = async (strokes: readonly InkEntry[]): Promise<string | null> => {
       if (gone || off) return null;
+      const bands = await inkPictures(strokes);
+      if (bands.length === 0 || gone) return bands.length === 0 ? '' : null;
+      try {
+        return (await readDocumentInk(documentId, bands)).text.trim();
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'ai_not_configured') off = true;
+        return null;
+      }
+    };
+
+    const later = (key: NodeKey, ms: number) => {
+      window.clearTimeout(timers.get(key));
+      timers.set(
+        key,
+        window.setTimeout(() => void read(key), ms),
+      );
+    };
+
+    const readOnce = async (key: NodeKey): Promise<string | null> => {
       const text = editor.read(() => {
         const node = $getNodeByKey(key);
         return $isRawBlockNode(node) ? node.getText() : null;
@@ -42,17 +70,15 @@ export function InkReader({ documentId }: { documentId: string }) {
       // Kept as one line (` / ` between its lines): its lines again.
       if ((ink.transcript?.mark ?? '') === mark)
         return (ink.transcript?.text ?? '').split(' / ').join('\n');
-      let said = '';
-      if (mark) {
-        const picture = await inkPicture(ink);
-        if (!picture || gone) return null;
-        try {
-          said = (await readDocumentInk(documentId, picture)).text;
-        } catch (error) {
-          if (error instanceof ApiError && error.code === 'ai_not_configured') off = true;
-          return null;
-        }
+      const said = mark ? await ask(ink.strokes) : '';
+      if (said === null) {
+        // Not read (offline, too many at once): once or twice more, a little later.
+        const tries = (failed.get(key) ?? 0) + 1;
+        failed.set(key, tries);
+        if (!gone && !off && tries <= 2) later(key, 15_000 * tries);
+        return null;
       }
+      failed.delete(key);
       if (gone) return null;
       editor.update(
         () => {
@@ -67,12 +93,38 @@ export function InkReader({ documentId }: { documentId: string }) {
         },
         { tag: [HISTORY_MERGE_TAG, INK_READ_TAG] },
       );
-      return said.trim();
+      return said;
     };
-    readers.set(editor, read);
+
+    const read = async (key: NodeKey): Promise<string | null> => {
+      window.clearTimeout(timers.get(key));
+      timers.delete(key);
+      const before = busy.get(key);
+      if (before) await before.catch(() => null);
+      const run = readOnce(key);
+      busy.set(key, run);
+      try {
+        return await run;
+      } finally {
+        if (busy.get(key) === run) busy.delete(key);
+      }
+    };
+    readers.set(editor, { drawing: read, strokes: ask });
+
+    /** What stands now is what was opened (or came in): seen, not read. */
+    const see = (state: EditorState) =>
+      state.read(() => {
+        for (const node of $getRoot().getChildren()) {
+          if ($isRawBlockNode(node)) seen.set(node.getKey(), node.getText());
+        }
+      });
 
     const unlisten = editor.registerUpdateListener(({ editorState, tags }) => {
-      if (tags.has('page-load') || tags.has(INK_READ_TAG) || !editor.isEditable()) return;
+      if (tags.has('page-load')) {
+        see(editorState);
+        return;
+      }
+      if (tags.has(INK_READ_TAG) || !editor.isEditable()) return;
       editorState.read(() => {
         for (const node of $getRoot().getChildren()) {
           if (!$isRawBlockNode(node)) continue;
@@ -81,27 +133,19 @@ export function InkReader({ documentId }: { documentId: string }) {
           if (seen.get(key) === text) continue;
           const first = !seen.has(key);
           seen.set(key, text);
-          // What stood when the page was opened is not read – only what is drawn now.
+          // A block just made (a drawing put down) has nothing to read yet.
           if (first) continue;
           if (!isInkFence(text.split('\n'))) continue;
-          window.clearTimeout(timers.get(key));
-          timers.set(
-            key,
-            window.setTimeout(() => void read(key), REST_MS),
-          );
+          failed.delete(key);
+          later(key, REST_MS);
         }
       });
     });
-    // What stands now is what was opened: seen, not read.
-    editor.getEditorState().read(() => {
-      for (const node of $getRoot().getChildren()) {
-        if ($isRawBlockNode(node)) seen.set(node.getKey(), node.getText());
-      }
-    });
+    see(editor.getEditorState());
 
     return () => {
       gone = true;
-      if (readers.get(editor) === read) readers.delete(editor);
+      if (readers.get(editor)?.drawing === read) readers.delete(editor);
       unlisten();
       for (const timer of timers.values()) window.clearTimeout(timer);
     };
